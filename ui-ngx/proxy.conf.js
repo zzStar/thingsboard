@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
 // SPDX-License-Identifier: Apache-2.0
-const forwardUrl = "http://localhost:8080";
-const wsForwardUrl = "ws://localhost:8080";
+const backendPort = process.env.TB_DEV_HTTP_PORT || "8080";
+const forwardUrl = `http://localhost:${backendPort}`;
+const wsForwardUrl = `ws://localhost:${backendPort}`;
 const ruleNodeUiforwardUrl = forwardUrl;
 
 const PROXY_CONFIG = {

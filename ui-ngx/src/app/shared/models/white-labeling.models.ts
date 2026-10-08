@@ -51,7 +51,7 @@ export interface LoginWhiteLabelingParams extends WhiteLabelingParams {
   showNameBottom?: boolean;
 }
 
-export const defaultImageUrl = 'assets/logo_title_black.svg';
+export const defaultImageUrl = 'assets/zhigong-logo.svg';
 export const defaultCollapsedImageUrl = 'assets/small_logo_title_black.svg';
 
 export const defaultWLParams: WhiteLabelingParams = {
@@ -77,7 +77,7 @@ export const defaultWLParams: WhiteLabelingParams = {
   platformVersion: env.tbVersion
 };
 
-const defaultLoginImageUrl = 'assets/logo_title_white.svg';
+const defaultLoginImageUrl = 'assets/zhigong-logo-white.svg';
 
 const loginWlParams = deepClone(defaultWLParams) as LoginWhiteLabelingParams;
 loginWlParams.logoImageUrl = defaultLoginImageUrl;

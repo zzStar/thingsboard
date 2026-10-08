@@ -39,6 +39,8 @@
         <skip.ui.build>${skip.yarn}</skip.ui.build>
         <pkg.process-resources.phase>none</pkg.process-resources.phase>
         <pkg.package.phase>none</pkg.package.phase>
+        <!-- Local source development needs the boot jar and data, but no Gradle OS packages. -->
+        <pkg.gradle.phase>${pkg.package.phase}</pkg.gradle.phase>
         <!-- Use -Dpkg.skip=true to skip all packaging at once (bootjar + deb + rpm + zip).
              Individual flags below can be set independently for finer control. -->
         <!-- Set to true to skip spring-boot:repackage (the boot jar, i.e. the *-boot.jar artifact).
@@ -665,7 +667,7 @@
                             </configuration>
                             <executions>
                                 <execution>
-                                    <phase>${pkg.package.phase}</phase>
+                                    <phase>${pkg.gradle.phase}</phase>
                                     <goals>
                                         <goal>invoke</goal>
                                     </goals>

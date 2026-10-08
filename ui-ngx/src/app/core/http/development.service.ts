@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: Copyright ThingsBoard, Inc.
 // SPDX-License-Identifier: BUSL-1.1
-import { Inject, Injectable, Renderer2, RendererFactory2, RendererStyleFlags2, DOCUMENT } from '@angular/core';
+import { Inject, Injectable, Renderer2, RendererFactory2, RendererStyleFlags2, DOCUMENT, isDevMode } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { map, tap } from 'rxjs/operators';
@@ -185,6 +185,10 @@ export class DevelopmentService {
    * Anything that produces a persisted artifact must decline instead - see {@link stampDevelopmentNotice}.
    */
   public checkIsDevelopment(): void {
+    // Keep the local Angular development preview clear while preserving production notices.
+    if (isDevMode()) {
+      return;
+    }
     this.resolveDevelopmentMode().subscribe({
       next: (developmentMode) => {
         if (developmentMode) {

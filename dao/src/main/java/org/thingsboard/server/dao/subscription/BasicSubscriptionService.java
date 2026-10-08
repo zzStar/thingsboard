@@ -31,7 +31,7 @@ import java.util.function.Predicate;
 
 @Service
 @Slf4j
-@Profile("!install & !test")
+@Profile("licensed & !install & !test")
 public class BasicSubscriptionService implements SubscriptionService {
 
     private static final Map<String, Predicate<String>> solutionTemplateLevelFilters = new HashMap<>();

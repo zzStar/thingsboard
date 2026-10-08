@@ -1,0 +1,13 @@
+.git
+.dev
+**/target
+**/node_modules
+**/.angular
+**/.gradle
+**/__pycache__
+**/.env
+**/*.env
+**/local.properties
+.DS_Store
+.claude
+.planning

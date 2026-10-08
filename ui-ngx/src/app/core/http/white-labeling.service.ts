@@ -142,7 +142,8 @@ export class WhiteLabelingService {
   }
 
   public logoImageUrl(): string {
-    return this.getCurrentWlParams() ? this.getCurrentWlParams().logoImageUrl : '';
+    const url = this.getCurrentWlParams() ? this.getCurrentWlParams().logoImageUrl : '';
+    return url === 'assets/logo_title_black.svg' ? defaultImageUrl : url;
   }
 
   public logoImageUrl$(): Observable<string> {
@@ -466,7 +467,8 @@ export class WhiteLabelingService {
 
 
   private applyLoginWlParams(wlParams: LoginWhiteLabelingParams) {
-    this.loginLogo = wlParams.logoImageUrl;
+    this.loginLogo = wlParams.logoImageUrl === 'assets/logo_title_white.svg'
+      ? 'assets/zhigong-logo-white.svg' : wlParams.logoImageUrl;
     this.loginLogoHeight = wlParams.logoImageHeight;
     this.loginPageBackgroundColor = wlParams.pageBackgroundColor;
     this.loginShowNameVersion = wlParams.showNameVersion;

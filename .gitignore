@@ -44,3 +44,4 @@ instance-license.data
 .planning
 docs/superpowers/
 __pycache__/
+.dev/

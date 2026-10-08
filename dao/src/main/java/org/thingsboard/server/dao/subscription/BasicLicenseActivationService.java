@@ -43,7 +43,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 @Service
 @Slf4j
-@Profile("!install & !test")
+@Profile("licensed & !install & !test")
 public class BasicLicenseActivationService implements LicenseActivationService, TbLicenseClientListener {
 
     @Value("${license.secret}")

@@ -16,8 +16,13 @@ ACTION=${1:-deploy}
 BUILD=${BUILD:-1}
 VERSION=${VERSION:-}
 FROM_VERSION=${FROM_VERSION:-}
+RESUME_PUSH=${RESUME_PUSH:-0}
 SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST")
 fail() { echo "ERROR: $*" >&2; exit 1; }
+[[ "$RESUME_PUSH" == 0 || "$RESUME_PUSH" == 1 ]] || fail 'RESUME_PUSH must be 0 or 1'
+if [[ "$ACTION" == deploy && "$RESUME_PUSH" == 1 ]]; then
+  [[ "$BUILD" == 0 && -n "$VERSION" ]] || fail 'RESUME_PUSH=1 requires BUILD=0 and an explicit VERSION'
+fi
 if [[ "$ACTION" == status || "$ACTION" == logs ]]; then
   "${SSH[@]}" "bash /opt/zhigong-things/deploy-remote.sh $ACTION"
   exit
@@ -71,8 +76,16 @@ PY
       --tag "$REPO:$VERSION" --load --progress plain . \
       2>&1 | tee ".dev/deploy-build-$VERSION.log"
     bash scripts/smoke-image.sh "$REPO:$VERSION" "$SCHEMA"
-    docker push "$REPO:$VERSION"
+    bash scripts/push-image.sh "$REPO:$VERSION"
   elif [[ "$BUILD" != 0 ]]; then fail 'BUILD must be 0 or 1'; fi
+  if [[ "$RESUME_PUSH" == 1 ]]; then
+    [[ "$BUILD" == 0 ]] || fail 'RESUME_PUSH=1 requires BUILD=0 and an explicit VERSION'
+    [[ "$(docker image inspect "$REPO:$VERSION" --format '{{.Architecture}}')" == amd64 ]] || fail 'Missing local amd64 image'
+    if docker buildx imagetools inspect "$REPO:$VERSION" >/dev/null 2>&1; then
+      fail 'Remote version already exists; omit RESUME_PUSH to deploy it without overwriting.'
+    fi
+    bash scripts/push-image.sh "$REPO:$VERSION"
+  elif [[ "$RESUME_PUSH" != 0 ]]; then fail 'RESUME_PUSH must be 0 or 1'; fi
   docker buildx imagetools inspect "$REPO:$VERSION" >/dev/null
   # Stage configuration in an immutable version directory; preserve existing release files on retries.
   "${SSH[@]}" "mkdir -p /opt/zhigong-things/releases/$VERSION"

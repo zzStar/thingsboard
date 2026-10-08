@@ -118,3 +118,11 @@
 - Yarn verbose逐文件Copying日志触发BuildKit output clipped, log limit 2MiB reached。Dockerfile在构建RUN内过滤verbose文件复制/目录/链接/删除行，保留请求、重试及错误。SHELL使用bash pipefail，验证过滤管道仍传播Maven非零退出状态；不能把日志裁剪当成构建失败。
 
 - 简体中文已对齐英文locale全量键：菜单先补25项；其后补1647个缺失键（智能体、IoT Hub、初始化、订阅、AI方案、组件等），修正88项已有英文标签。英语源13499个键均有简体中文对应，保留协议/品牌/代码名称。校验新增/修改1735项的Angular插值、HTML标签、URL、代码块、美元变量与ICU参数/分支，实际MessageFormat编译通过；JSON无重复键、类型差异或空值。只改zh_CN，不改zh_TW/英文及数据库；服务器需要下一次make deploy才应用。
+
+- 推送大层出现到Docker Desktop代理192.168.65.1:3128的broken pipe，是上传网络连接中断；不是构建失败。push-image.sh自动重试三次，make deploy VERSION=原版本 BUILD=0 RESUME_PUSH=1复用本地amd64镜像推送并继续部署，禁止覆盖已存在远端标签。已完成镜像层复用，部分未上传层不保证字节续传。
+
+- 2026-10-08 已重试成功推送并部署版本20261008-205557-e8dc5bdc3d，digest sha256:4386f4089bacc24960e358cf8b74f3345ae8e40d01318eba13476ebe1be45d4b。备份/opt/zhigong-things/backups/20261008T132903Z-20261008-192911-e8dc5bdc3d.dump。服务器应用约81秒启动，无OOM/重启，公网HTTPS setup状态READY，部署记录已更新；生产中文静态资源已核对新增模块存在。
+
+- 已修复生产MQTT1883不可达：容器MQTT原已启动，但Compose未publish。deploy/compose.yml新增1883:1883，当前服务器release已锁定备份配置并重建应用，容器映射0.0.0.0/[::]:1883。Mac分别通过IP和域名发送MQTT3.1.1 CONNECT，均收到CONNACK（匿名探测被拒绝，证明公网协议链路通）；HTTPS setup状态READY。设备正式连接需使用对应设备访问令牌；未开放8883等其他协议。
+
+- 生产端口核查：1883/TCP已公开，Web/HTTP设备API走Caddy80/443，8080映射回环18080。容器内还监听UDP5683、5685–5688以及TCP7070（Edge）、9090（远程集成），仅对应功能使用时发布。9090是INTEGRATIONS_RPC_PORT，不可误写成纯内部端口。8883/MQTT TLS与5684/CoAP DTLS未启用，需要证书配置；SNMP随机UDP绑定，TRAP需固定端口。此次仅核查，不额外开放这些端口。

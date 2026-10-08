@@ -120,3 +120,17 @@ Docker buildx 明确指定 linux/amd64。Apple Silicon 上仿真构建可能较�
 在 Mac Docker Desktop 的 Settings → Resources → Memory 分配建议 10–12 GiB 内存（当前 Mac 物理内存 24 GiB），Apply & Restart 后执行 make deploy。停止不需要的开发容器和本地前后端可减少资源竞争。脚本检查 Docker VM 总内存，不代表剩余可用内存。
 
 Docker 专用生产命令 build:prod:docker 使用 Node 4 GiB 堆和 Angular 两个 workers，Maven 1 GiB 堆；普通 build:prod 保持原值。目标镜像依然是 linux/amd64，保留全部生产优化。退出137/Killed且 cannot allocate memory 是内存耗尽，不是前端 peer dependency warning。Maven/Yarn下载缓存可复用，但失败的 RUN 层没有保留已编译模块，重试仍会重新编译。
+
+## 推送中断后继续
+
+镜像已构建且 smoke test 通过、仅推送失败时，执行 `make deploy VERSION=原版本 BUILD=0 RESUME_PUSH=1`，复用本地 linux/amd64 镜像重新推送后继续部署。完整上传的层会复用，未完成的大层可能重新上传，不保证按字节续传。推送自动最多重试三次。远端标签已存在时拒绝覆盖，可移除 RESUME_PUSH 使用该远端镜像部署。
+
+## MQTT 接入
+
+Compose 发布 TCP 1883 到 ThingsBoard 容器1883，设备连接 things.zhigongshulian.com:1883。需在阿里云安全组允许 TCP 1883 入站。网站 HTTPS 的 Caddy 不代理此 MQTT 端口；1883为普通MQTT，8883需单独配置MQTT TLS。Dockerfile EXPOSE只是元数据，不能代替Compose ports。
+
+## 其他端口核查（当前部署）
+
+网站及HTTP设备API通过443/TCP访问，80/TCP供Caddy重定向/证书验证，MQTT1883/TCP已发布；8080仅回环18080与Docker内网。其他接入按需求发布：CoAP5683/UDP；LwM2M5685–5688/UDP（服务5685/5686、Bootstrap5687/5688）；Edge同步7070/TCP；远程集成9090/TCP。已核实这些接入端口在容器内监听但未对外映射。
+
+MQTTS8883/TCP和CoAPS5684/UDP当前未启用，须配置证书及TLS/DTLS开关后才可发布。SNMP为随机UDP监听，常规轮询无须映射入站；需要接收TRAP时先设置固定SNMP_BIND_PORT（例如1620）及UDP映射。PostgreSQL5432不发布公网。上述端口不是每个部署都必须开放，当前仅MQTT及HTTP设备接入已经满足。

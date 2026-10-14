@@ -3,22 +3,32 @@
 # SPDX-License-Identifier: BUSL-1.1
 #
 
-FROM maven:3.9.11-eclipse-temurin-25 AS build
+ARG BUILD_BASE_IMAGE=m.daocloud.io/docker.io/library/maven:3.9.11-eclipse-temurin-25
+ARG RUNTIME_BASE_IMAGE=m.daocloud.io/docker.io/library/eclipse-temurin:25-jre
+
+FROM ${BUILD_BASE_IMAGE} AS build
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV MAVEN_OPTS="-Xmx1024m -XX:ActiveProcessorCount=2" \
     NG_BUILD_MAX_WORKERS=2 \
-    YARN_CACHE_FOLDER=/root/.cache/yarn
+    YARN_CACHE_FOLDER=/root/.cache/yarn \
+    NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
 WORKDIR /src
 COPY deploy/maven-settings.xml /root/.m2/settings.xml
+COPY --from=github-deps / /opt/github-deps/
 COPY . .
 RUN --mount=type=cache,target=/root/.m2/repository \
     --mount=type=cache,target=/root/.cache/yarn \
+    --mount=type=cache,id=thingsboard-github-deps,target=/root/.cache/github-deps,sharing=locked \
+    (cd /opt/github-deps && sha256sum --check checksums.sha256) \
+    && cp -R /opt/github-deps/archives/. /root/.cache/github-deps/ \
+    && printf '\nyarn-offline-mirror "/root/.cache/github-deps"\n' >> ui-ngx/.yarnrc \
+    && \
     mvn -B install -pl application -am -DskipTests \
       -Dmaven.gitcommitid.skip=true -Dpkg.gradle.phase=none \
       -Dpkg.skip.deb=true -Dpkg.skip.rpm=true -Dpkg.skip.zip=true \
       -Dskip.ui.production.build=false \
       -Dyarn.build.script=build:prod:docker \
-      '-Dyarn.install.extra.args=--verbose --prefer-offline' \
+      '-Dyarn.install.extra.args=--frozen-lockfile --verbose --prefer-offline' \
       2>&1 | sed -u -E '/\[INFO\] verbose [0-9.]+ (Copying|Creating directory|Creating symlink|Removing) /d' \
     && mkdir -p /out/extensions \
     && cp application/target/*-boot.jar /out/thingsboard.jar \
@@ -26,7 +36,7 @@ RUN --mount=type=cache,target=/root/.m2/repository \
     && cp -R application/target/extensions/. /out/extensions/ \
     && cp application/src/main/resources/logback.xml /out/logback.xml
 
-FROM eclipse-temurin:25-jre
+FROM ${RUNTIME_BASE_IMAGE}
 ARG APP_SCHEMA
 ARG APP_SOURCE
 LABEL com.zhigong.schema=$APP_SCHEMA org.opencontainers.image.revision=$APP_SOURCE

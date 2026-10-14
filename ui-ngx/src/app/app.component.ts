@@ -128,6 +128,11 @@ export class AppComponent {
   }
 
   setupAuth(gotoDefaultPlace: boolean) {
+    if (window.location.pathname.startsWith('/production-screen/')) {
+      const settings = this.storageService.getItem(SETTINGS_KEY);
+      this.notifyUserLang(settings?.userLang ?? null);
+      return;
+    }
     this.store.select(selectUserReady).pipe(
       filter((data) => data.isUserLoaded),
       tap((data) => {

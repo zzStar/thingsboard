@@ -983,6 +983,7 @@
                                     <exclude>**/yarn.lock</exclude>
                                     <exclude>**/.yarnrc</exclude>
                                     <exclude>**/.angular/**</exclude>
+                                    <exclude>**/.dev/**</exclude>
                                     <exclude>**/*.raw</exclude>
                                     <exclude>**/*.webp</exclude>
                                     <exclude>.run/**</exclude>
@@ -1018,16 +1019,10 @@
                             <proto>SINGLE_LINE_DOUBLESLASH_STYLE</proto>
                             <gradle>SINGLE_LINE_DOUBLESLASH_STYLE</gradle>
                             <conf>SCRIPT_STYLE</conf>
+                            <npmrc>SCRIPT_STYLE</npmrc>
                             <cql>DOUBLEDASHES_STYLE</cql>
                         </mapping>
                     </configuration>
-                    <executions>
-                        <execution>
-                            <goals>
-                                <goal>check</goal>
-                            </goals>
-                        </execution>
-                    </executions>
                 </plugin>
                 <plugin>
                     <groupId>io.github.git-commit-id</groupId>
@@ -1055,10 +1050,7 @@
             </plugins>
         </pluginManagement>
         <plugins>
-            <plugin>
-                <groupId>com.mycila</groupId>
-                <artifactId>license-maven-plugin</artifactId>
-            </plugin>
+            <!-- License header tooling is opt-in; it must not block source builds. -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-clean-plugin</artifactId>

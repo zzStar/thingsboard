@@ -252,6 +252,15 @@ export class DevicesTableConfigResolver  {
 
   configureCellActions(config: EntityTableConfig<DeviceInfo>): Array<CellActionDescriptor<DeviceInfo>> {
     const actions: Array<CellActionDescriptor<DeviceInfo>> = [];
+    actions.push({
+      name: this.translate.instant('production.open'),
+      icon: 'bar_chart',
+      isEnabled: () => true,
+      onAction: ($event, entity) => {
+        $event.stopPropagation();
+        this.router.navigate(['/production'], {queryParams: {deviceId: entity.id.id}});
+      }
+    });
     if (this.userPermissionsService.hasGenericPermission(Resource.DEVICE, Operation.READ_CREDENTIALS) &&
       !this.userPermissionsService.hasGenericPermission(Resource.DEVICE, Operation.WRITE_CREDENTIALS)) {
       actions.push(

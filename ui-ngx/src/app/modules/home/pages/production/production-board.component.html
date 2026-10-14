@@ -1,0 +1,25 @@
+<!--
+
+    SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+    SPDX-License-Identifier: Apache-2.0
+
+-->
+<div class="production-board" [class.screen-mode]="screenMode">
+    <div class="metrics">
+      <article class="metric speed">@if (screenMode) { <i class="frame-trim" aria-hidden="true"></i> }<span>{{ 'production.speed' | translate }}</span><strong>{{ overview?.speed === null || staleSpeed ? '—' : (overview?.speed | number:'1.0-0') }}@if (overview?.config.unit) { <small>{{ overview.config.unit }}/{{ 'production.hour' | translate }}</small> }</strong><span>{{ staleSpeed ? ('production.stale-speed' | translate) : displayTime(overview?.speedTs) }}</span></article>
+      <article class="metric">@if (screenMode) { <i class="frame-trim" aria-hidden="true"></i> }<span>{{ 'production.today' | translate }}</span><strong>{{ !overview?.firstSampleTs ? '—' : (overview?.today | number) }}<small>{{ overview?.config.unit }}</small></strong><span>{{ overview?.productionDate }} · {{ status(overview?.status) }}</span></article>
+      <article class="metric">@if (screenMode) { <i class="frame-trim" aria-hidden="true"></i> }<span>{{ 'production.week' | translate }}</span><strong>{{ !overview?.firstSampleTs ? '—' : (overview?.week | number) }}<small>{{ overview?.config.unit }}</small></strong><span>{{ 'production.week-start' | translate }}</span></article>
+      <article class="metric">@if (screenMode) { <i class="frame-trim" aria-hidden="true"></i> }<span>{{ 'production.month' | translate }}</span><strong>{{ !overview?.firstSampleTs ? '—' : (overview?.month | number) }}<small>{{ overview?.config.unit }}</small></strong><span>{{ 'production.production-day-basis' | translate }}</span></article>
+    </div>
+    <div class="shifts">
+      @for (row of overview?.shifts || []; track row.startTs) {
+        <article>@if (screenMode) { <i class="frame-trim" aria-hidden="true"></i> }<div><h2>{{ row.shiftName }}</h2><span>{{ displayTime(row.startTs, 'MM-DD HH:mm') }} — {{ displayTime(row.endTs, 'MM-DD HH:mm') }}</span><span class="status" [class.warning]="row.status === 'INCOMPLETE' || row.status === 'ESTIMATED'">{{ status(row.status) }}</span></div><strong>{{ row.status === 'NO_DATA' || row.status === 'NOT_STARTED' ? '—' : (row.quantity | number) }}<small>{{ row.unit }}</small></strong></article>
+      }
+    </div>
+    <div class="plots">
+      <article>@if (screenMode) { <i class="frame-trim" aria-hidden="true"></i> }<h2>{{ 'production.speed-trend' | translate }}</h2><div #speedChart class="chart" role="img" [attr.aria-label]="'production.speed-trend' | translate"></div></article>
+      <article>@if (screenMode) { <i class="frame-trim" aria-hidden="true"></i> }<h2>{{ 'production.output-trend' | translate }}</h2><div #outputChart class="chart" role="img" [attr.aria-label]="'production.output-trend' | translate"></div></article>
+    </div>
+    <footer><span>{{ 'production.production-day' | translate }}: {{ displayTime(overview?.dayStart) }} — {{ displayTime(overview?.dayEnd) }}</span><span>{{ 'production.data-as-of' | translate }}: {{ displayTime(overview?.lastSampleTs) }}</span></footer>
+    <p class="hint">{{ 'production.collection-start' | translate }}: {{ displayTime(overview?.firstSampleTs) }} · {{ 'production.collection-hint' | translate }}</p>
+</div>

@@ -17,6 +17,8 @@ BUILD=${BUILD:-1}
 VERSION=${VERSION:-}
 FROM_VERSION=${FROM_VERSION:-}
 RESUME_PUSH=${RESUME_PUSH:-0}
+BUILD_BASE_IMAGE=${BUILD_BASE_IMAGE:-m.daocloud.io/docker.io/library/maven:3.9.11-eclipse-temurin-25}
+RUNTIME_BASE_IMAGE=${RUNTIME_BASE_IMAGE:-m.daocloud.io/docker.io/library/eclipse-temurin:25-jre}
 SSH=(ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST")
 fail() { echo "ERROR: $*" >&2; exit 1; }
 [[ "$RESUME_PUSH" == 0 || "$RESUME_PUSH" == 1 ]] || fail 'RESUME_PUSH must be 0 or 1'
@@ -70,8 +72,20 @@ PY
 )
     SOURCE=$(git rev-parse HEAD)
     [[ -z "$(git status --porcelain)" ]] || SOURCE="$SOURCE-dirty"
+    echo '准备锁定版本的 GitHub 依赖缓存…'
+    GITHUB_DEPS_CACHE=$(python3 scripts/cache-github-deps.py)
+    echo "构建基础镜像：$BUILD_BASE_IMAGE"
+    echo "运行基础镜像：$RUNTIME_BASE_IMAGE"
+    BASE_IMAGES=$(python3 scripts/cache-base-images.py --build-image "$BUILD_BASE_IMAGE" --runtime-image "$RUNTIME_BASE_IMAGE")
+    BUILD_BASE_CONTEXT=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["build"]["context"])' "$BASE_IMAGES")
+    RUNTIME_BASE_CONTEXT=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["runtime"]["context"])' "$BASE_IMAGES")
     echo "Building $REPO:$VERSION (linux/amd64)"
     docker buildx build --platform linux/amd64 -f deploy/Dockerfile \
+      --build-context "github-deps=$GITHUB_DEPS_CACHE" \
+      --build-context "production-build-base=$BUILD_BASE_CONTEXT" \
+      --build-context "production-runtime-base=$RUNTIME_BASE_CONTEXT" \
+      --build-arg "BUILD_BASE_IMAGE=production-build-base" \
+      --build-arg "RUNTIME_BASE_IMAGE=production-runtime-base" \
       --build-arg "APP_SCHEMA=$SCHEMA" --build-arg "APP_SOURCE=$SOURCE" \
       --tag "$REPO:$VERSION" --load --progress plain . \
       2>&1 | tee ".dev/deploy-build-$VERSION.log"

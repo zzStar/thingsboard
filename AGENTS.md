@@ -126,3 +126,68 @@
 - 已修复生产MQTT1883不可达：容器MQTT原已启动，但Compose未publish。deploy/compose.yml新增1883:1883，当前服务器release已锁定备份配置并重建应用，容器映射0.0.0.0/[::]:1883。Mac分别通过IP和域名发送MQTT3.1.1 CONNECT，均收到CONNACK（匿名探测被拒绝，证明公网协议链路通）；HTTPS setup状态READY。设备正式连接需使用对应设备访问令牌；未开放8883等其他协议。
 
 - 生产端口核查：1883/TCP已公开，Web/HTTP设备API走Caddy80/443，8080映射回环18080。容器内还监听UDP5683、5685–5688以及TCP7070（Edge）、9090（远程集成），仅对应功能使用时发布。9090是INTEGRATIONS_RPC_PORT，不可误写成纯内部端口。8883/MQTT TLS与5684/CoAP DTLS未启用，需要证书配置；SNMP随机UDP绑定，TRAP需固定端口。此次仅核查，不额外开放这些端口。
+
+- 2026-10-14 用户要求两个发布基础镜像走国内源。deploy/Dockerfile 默认使用 docker.m.daocloud.io/library/maven:3.9.11-eclipse-temurin-25 与 docker.m.daocloud.io/library/eclipse-temurin:25-jre；make deploy 支持 BUILD_BASE_IMAGE / RUNTIME_BASE_IMAGE 覆盖完整地址并显示实际来源，不修改宿主机 Docker 配置。已验证两个 linux/amd64 manifest、当前 eim-builder 国内源元数据获取和现有镜像层中的 Java/Maven 运行，正式 Dockerfile --call=check 无警告，make deploy-check/diff 检查通过。本轮未执行完整应用构建、推送或部署。
+
+- 2026-10-14 发布构建失败于 TbResourceApiClientTest：资源类型筛选传 String，但当前 thingsboard-pe-client:4.4.0 的 builder 要求 Set<ResourceType>。已改为 Set.of(ResourceType.JS_MODULE)，保留 -DskipTests 对测试代码的编译。本机同版本旧缓存 SHA-1 85b91d4403dc445bb5388adc055449a756efa527；Docker 包及官方仓库当前 SHA-1 均为 3048cd74e713f9fabc923a651b92e0dab6cf05a0。只更新了本机该 jar/sha1，旧包备份 .dev/resource-client-cache-check/host-backup/。JDK25 下 application 663个测试源文件 test-compile 已通过，日志 .dev/resource-api-current-client-test-compile.log。
+
+- 同次修复后完整 linux/amd64 发布 Dockerfile 构建已通过，Maven 6分36秒：生产前端、application全部663个测试源文件、boot jar 与运行镜像步骤成功；日志 .dev/resource-api-docker-build.log。结果仅保留 BuildKit 缓存，本轮没有导出发布标签、推送、smoke test 或服务器部署。
+
+## 设备产量（2026-10-14）
+
+- 用户补充要求设备详情入口、每设备永久免登录大屏链接。已将“查看产量”放到实际使用的 DeviceComponent 顶部，并在设备列表加入图表入口；PE详情用通用GroupEntityTabsComponent，原专用DeviceTabs入口不会显示。租户管理员在产量看板生成/复制、重置、停用链接，管理API同时检查READ_TELEMETRY和WRITE_ATTRIBUTES。
+- 独立路由 /production-screen/<deviceId>#key=<32字节随机密钥>，不依赖JWT、登录或刷新令牌，密钥保存在production_screen_link，无到期时间，普通发版/服务重启不变。公开GET /api/noauth/production/<deviceId>/screen只返回绑定设备的看板数据，用X-Production-Screen-Key请求头，无公开写入/设置/历史任意范围接口。重置/停用/设备删除失效，SQL校验实际device.tenant_id与链接所属租户一致。成功快照no-store，密钥不随页面URL请求发送给服务器。
+- 看板共用ProductionBoardComponent，每5秒轮询，首次失败也重试，断线保留上次产量、隐藏实时速度并显示重连与更新时间；独立路由跳过登录初始化但加载完整静态语言，防止已有JWT过期导致跳转登录。大屏撑满根flex容器、支持大字号、全屏与iframe。当前默认X-Frame-Options关闭，部署若另外加frame-ancestors/X-Frame-Options需允许大屏平台。
+- 已验证21项计算/PostgreSQL/Spring接口测试，包含永久/服务重建/幂等建表/并发生成/匿名只读/不同设备/重置停用删除与管理权限；加强权限检查后再次通过全部5项Spring接口测试。Angular类型、模板、ESLint、生产构建及许可证头检查通过。浏览器使用生产前端+本地模拟接口验证中文、过期登录状态不参与请求、5秒更新、断线/初次失败恢复与跨域iframe；测试截图.dev/production-screen-preview.jpg。测试模拟服务仅监听回环，未生成生产设备链接、推送或部署服务器。
+
+- 已实现独立“监控 → 设备产量”页面，设备详情提供入口；今日/本周/本月、各班产量、速度趋势、历史范围查询及Excel/CSV导出。默认单位“贴”、速度“贴/小时”，默认白班07:00–19:00、夜班19:00–次日07:00；支持配置单位、两班/三班、班次名称和起点。按生产日统计，跨日班次归开始日。
+- 用户确认停机、清零、重开工单耗时远大于2秒上报间隔；按totalCount下降识别清零，正常差分、下降后计入当前值，首次读数只建立基线。已实现防重、显式覆盖、迟到数据对后继增量的修正。边界按整数累计比例分配并标记估算；断报与持续上报的零产量区分。
+- application正常启动时以幂等SQL建立production_*扩展表：2秒/source计数与增量、分钟、班次/生产日汇总、配置版本、回算进度；外键随设备删除清理。安装模式不加载产量服务。配置从未来生产日生效，历史配置保留。遥测历史保存成功后自动参与计算，设备协议和规则链无须修改。
+- 历史页面支持原有totalCount遥测回算，后台分页、每次最多31天、重复执行防重；已过期/未采集的原始数据无法恢复。普通查询最多366天，导出包含全部查询结果而非当前分页。当前不按时间自动删除产量明细。
+- 已验证14项计算/独立PostgreSQL服务测试、3项完整Spring接口测试，包含多次清零、迟到修正、并发防重、重启续算、历史分页回算和未分配设备权限。Angular应用类型/模板、定向ESLint、开发和生产构建、application/ui-ngx许可证头检查通过。测试容器因Ryuk镜像下载超时使用TESTCONTAINERS_RYUK_DISABLED=true，并确认测试结束清理。本轮未构建/发布正式镜像，未部署服务器。使用说明和验证命令见docs/PRODUCTION.md。
+
+- 2026-10-14 大屏外观按用户工业看板参考图美化：深蓝大标题/品牌栏、浅灰背景、折角双线框、黄色点缀、蓝色图表与日期星期时钟，样式限独立大屏模式。生产Angular构建、定向ESLint通过，浏览器核对1920×1080、1366×768完整显示及390×844无横向溢出，控制台无错误。截图 `.dev/production-screen-tech-preview.jpg` 使用模拟测试数据，本次未部署服务器。
+
+- 2026-10-14 用户要求大屏撑满高度：独立大屏改为视口高度及弹性布局，图表填满剩余空间，窄屏保留纵向滚动。生产构建通过，浏览器验证1366×768、1920×1080、2560×1440及高屏缩回矮屏正常，390×844无横向溢出。最新模拟数据截图 `.dev/production-screen-height-preview.jpg`，未部署服务器。
+
+- 2026-10-14 用户将速度遥测键由 `speed-p` 改为 `speed`：产量概览实时速度、登录看板速度趋势及匿名大屏速度趋势均读取 `speed`；单位配置保持原样。同步测试数据/模拟及使用说明，5项Spring接口测试通过，覆盖实时速度及两种趋势接口读取新键。本次未部署。
+
+- 2026-10-14 用户再次要求各设备独立设置单位：核对现有production_config已按设备保存；管理看板顶部新增“设置单位”入口，统计设置标签改为“单位与班次”，增加单位示例与设备作用范围/未来生产日生效提示。默认单位仍为贴，速度使用对应单位/小时，报表及导出使用各记录所属配置的单位。生产Angular构建、定向HTML ESLint及双语键检查通过，未部署。
+
+- 2026-10-14 产量页日期/时间改为应用内MatDatetimepicker，覆盖历史起止、生效日期及班次开始时间，点击框/图标可选，保留手输；局部ProductionDatetimeAdapter支持HH:mm并拒绝24:00等无效时间，不影响其他页面。Date桥接保留设备时区查询语义，缓存Date引用避免NgModel反复触发变更检测。生产构建、定向ESLint、ui-ngx许可证检查、60项转换/解析检查通过；浏览器模拟接口验证日历/时分/班次联动和手动输入，请求时区正确。截图 `.dev/production-datepicker-preview.jpg`，未部署。
+
+- 2026-10-14 修复单位保存后仍显示贴：原单位跟班次延期生效，现单位名称保存立即生效，班次/时区/上报间隔仍未来生效。单位为设备范围显示名称，历史报表和导出同步改名，数字不换算；读取配置统一使用最新单位以兼容旧待生效修改，保存更新该设备各配置版本单位，不新增边界/重算汇总，保留待生效班次。前端保存后重读概览/图表/报表并阻止旧轮询覆盖，匿名大屏下一次5秒轮询更新，原链接保持有效。24项计算/PostgreSQL/Spring测试、生产前端构建及ESLint通过，浏览器模拟保存张后直接显示张/小时，截图 `.dev/production-unit-immediate-preview.jpg`。这条取代此前单位随未来生产日生效的口径；未部署服务器。
+
+## npm国内镜像（2026-10-14）
+
+
+
+- 用户要求npm registry使用https://registry.npmmirror.com。已在ui-ngx/.npmrc、.yarnrc配置，发布Docker构建设置NPM_CONFIG_REGISTRY；本机全局配置不修改。本地npm/Yarn、Maven前端插件及make dev从项目配置读取。
+- Yarn1锁文件1578个registry.yarnpkg.com下载地址已替换为npmmirror。经锁文件解析和结构比较验证，版本、依赖、integrity、校验片段保持原样；11个GitHub地址保留。GitHub tarball/Git依赖以及Node/Yarn自身分发下载不由npm registry加速。
+- 已验证npm/Yarn config get registry，空缓存Yarn实际请求npmmirror下载锁定的moment 2.31.0，安装成功（单次样本1.47秒）。根pom添加npmrc许可证注释映射。只验证配置与代表性依赖下载，未重新构建完整正式镜像、未推送或部署；运行中的旧构建不会读取本次修改。
+
+## GitHub依赖构建缓存（2026-10-14）
+
+- 用户要求缓存当前锁定GitHub依赖。scripts/cache-github-deps.py从yarn.lock读取5个包，按来源/版本/SHA-1或commit优先复用本机Yarn tarball；独立归档存入忽略的.dev/github-deps/<依赖指纹>，约28 MiB。缺失包按锁定SHA/commit下载，Git包走codeload固定commit，不查询master/分支；不修改package.json或锁文件版本。make cache-github可仅准备缓存。
+- make deploy自动准备并通过命名BuildKit上下文github-deps传给Docker；Docker校验SHA-256、导入持久化thingsboard-github-deps缓存，并配置Yarn offline mirror。正式Yarn安装加--frozen-lockfile。源码变化、失败重试、builder更换均可从本机归档恢复；最终运行镜像不含构建缓存。直接docker build须传同一--build-context，见docs/DEPLOYMENT.md。
+- 已验证5包全部缓存命中、空Yarn缓存/禁用Git的离线安装、Linux容器断网安装、BuildKit上下文COPY及第二次CACHED、损坏缓存恢复、cold Git commit下载与原Yarn归档逐文件一致。make deploy-check及根license:check通过；根pom排除生成的.dev/**，避免检查缓存/第三方验证文件。完整发布Dockerfile检查受Docker Hub auth.docker.io超时阻断，未完整重建镜像、未推送或部署。
+
+## 开发退出清理（2026-10-14）
+
+- 用户连续 Ctrl+C 后出现 Error 129 与残留 .dev/lock。原 cleanup 恢复 INT/TERM 默认处理且未处理 HUP，退出清理可能被后续信号打断。scripts/dev.sh 现处理 HUP，清理期间忽略 INT/TERM/HUP，最多等待前后端退出20秒后强制结束，最后删除锁。
+- 已验证 Bash 语法、diff检查和独立临时环境 SIGINT/SIGTERM/SIGHUP 退出及再次获取锁；未重新执行完整 make dev 构建启动。本次确认无开发前后端进程、8080/4200无监听后，已用 rmdir 删除残留空锁。make dev-down 仍只停止数据库、保留数据卷。
+
+## 构建文件头与基础镜像缓存（2026-10-14）
+
+- 用户要求去掉阻断构建的License check。报错为mock-device.sh缺文件头，不是外部激活检查。根pom移除license-maven-plugin的自动激活及check执行绑定，保留手动工具和原有版权内容。52模块的application依赖图validate通过，effective POM确认无自动license插件，make dev/make deploy无需额外跳过参数。未完整运行make dev。
+- make deploy读取DaoCloud基础镜像tag的HEAD请求曾返回502；当前已恢复，两个DaoCloud地址manifest digest一致。默认改为官方推荐m.daocloud.io/docker.io前缀，首次下载失败在该地址与docker.m.daocloud.io之间最多尝试3次，不自动回退Docker Hub或更改宿主机配置。
+- 新增scripts/cache-base-images.py与make cache-base；两个linux/amd64基础镜像完整OCI内容存.dev/base-images（本机约287 MiB），按镜像来源/架构分组，digest不可变目录及原子选择记录，fcntl串行准备，使用前校验manifest/config/层SHA256与架构。make deploy通过两个OCI命名上下文提供FROM，命中无远端tag解析；刷新用python3 scripts/cache-base-images.py --refresh，保留旧目录。apt与其他依赖仍可能需要联网。
+- 已验证实际Java25/Maven3.9.11禁网RUN探针（开启--pull、--no-cache）、正式Dockerfile双OCI上下文检查、两镜像重复HIT、模拟首次失败重试/地址切换、命中不调用Docker、别名复用、刷新失败保护、损坏恢复和带空格路径。make deploy-check/diff通过，未完整重建应用镜像、推送或部署。
+- 用户截图速度为空：当前新建mock-device.sh仍发speed-p，已仅将两处速度字段同步为speed，未修改连接凭据，Bash语法通过；运行中的脚本需要重启，本轮未发送模拟遥测。
+
+## 速度趋势查询区间数（2026-10-14）
+
+- 用户报/api/production/.../speed 400：原按1440点构造间隔，与database.ts_max_intervals默认700不符，长时间范围（796区间）被BaseTimeseriesService拒绝。新增ProductionSpeedQuery统一按min(1440,实际平台上限)向上取整间隔，至少1分钟；普通速度接口与匿名大屏注入同一database.ts_max_intervals配置，不修改全局限制。界面仍5秒刷新。
+- 已通过4项查询边界/自定义上限/大范围测试与7项Spring真实接口测试（平台限制350），覆盖用户具体时间范围、24小时和匿名大屏，11项全通过、diff检查通过。仅后端变更，未重建前端、发布镜像或部署服务器；日志.dev/production-speed-interval-tests.log。
+
+- 2026-10-14 修复匿名产量大屏断连空白：原快照速度趋势失败会使全接口失败，首次加载又仅在有完整view时渲染。现速度趋势失败/5秒超时返回speedUnavailable标记与已落库概览/历史；保留同一生产日已有曲线。前端设备断报显示等待上报提示，过期速度显示不可用，历史保留；每次成功保存浏览器最近快照（按设备与密钥SHA-256隔离、不存原密钥），503/超时及刷新恢复快照，显示完整上次更新时间，5秒自动重试。无缓存且API不可达时展示框架与“—”，不虚构0；404停用/重置清除视图和缓存并停止轮询。语言加载期间提示使用翻译管道，避免首次失败显示翻译键。24项生产/PostgreSQL/Spring测试、缓存异常/隔离验证、最终生产Angular构建及定向ESLint通过；浏览器本地模拟验证断报、503刷新历史、首次失败框架、自动恢复、速度部分失败、404清除，1920×1080无溢出，截图.dev/production-screen-offline-preview.jpg。未发布或部署。

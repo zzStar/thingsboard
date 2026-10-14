@@ -1,0 +1,95 @@
+<!--
+
+    SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+    SPDX-License-Identifier: Apache-2.0
+
+-->
+<div #page class="production-page">
+  <header>
+    <div><h1>{{ 'production.title' | translate }}</h1><span>{{ deviceName }}</span></div>
+    <div class="header-actions">
+      <tb-entity-autocomplete [entityType]="deviceType" [ngModel]="selectedDevice" (ngModelChange)="selectDevice($event)"
+                              useFullEntityId [labelText]="'production.device'" appearance="outline"></tb-entity-autocomplete>
+      @if (canConfigure && overview) {
+        <button mat-stroked-button (click)="setTab('settings')"><mat-icon>edit</mat-icon>{{ 'production.configure-unit' | translate }}: {{ overview.config.unit }}</button>
+      }
+      <button mat-stroked-button (click)="fullscreen()" [disabled]="!overview"><mat-icon>fullscreen</mat-icon>{{ 'production.fullscreen' | translate }}</button>
+    </div>
+  </header>
+  @if (error) { <div class="message error" role="alert">{{ error }}</div> }
+  @if (notice) { <div class="message" role="status">{{ notice }}</div> }
+  @if (loading && !overview) { <mat-progress-bar mode="indeterminate"></mat-progress-bar> }
+  @if (!deviceId) { <div class="empty">{{ 'production.select-device' | translate }}</div> }
+  <nav [hidden]="!overview" aria-label="Production views">
+    <button mat-button [class.active]="tab === 'overview'" (click)="setTab('overview')">{{ 'production.overview' | translate }}</button>
+    <button mat-button [class.active]="tab === 'history'" (click)="setTab('history')">{{ 'production.history' | translate }}</button>
+    @if (canConfigure) { <button mat-button [class.active]="tab === 'settings'" (click)="setTab('settings')">{{ 'production.settings' | translate }}</button> }
+    <span class="spacer"></span>
+    <button mat-icon-button [disabled]="loading" (click)="refresh()" [matTooltip]="'production.refresh' | translate"><mat-icon>refresh</mat-icon></button>
+  </nav>
+  <section [hidden]="tab !== 'overview' || !overview">
+    @if (canShareLink && overview) {
+      <div class="screen-link-panel">
+        <div><h2>{{ 'production.screen-link' | translate }}</h2><p class="hint">{{ 'production.screen-link-hint' | translate }}</p></div>
+        @if (screenLink) {
+          <mat-form-field appearance="outline"><mat-label>{{ 'production.screen-link' | translate }}</mat-label><input matInput readonly [value]="screenUrl"></mat-form-field>
+          <button mat-flat-button color="primary" ngxClipboard [cbContent]="screenUrl" (cbOnSuccess)="copyScreenLink()" [disabled]="linkBusy"><mat-icon>content_copy</mat-icon>{{ 'production.screen-copy' | translate }}</button>
+          <a mat-stroked-button [href]="screenUrl" target="_blank" rel="noopener noreferrer"><mat-icon>open_in_new</mat-icon>{{ 'production.screen-open' | translate }}</a>
+          <button mat-button (click)="resetScreenLink()" [disabled]="linkBusy">{{ 'production.screen-reset' | translate }}</button>
+          <button mat-button (click)="revokeScreenLink()" [disabled]="linkBusy">{{ 'production.screen-revoke' | translate }}</button>
+        } @else {
+          <button mat-flat-button color="primary" (click)="createScreenLink()" [disabled]="linkBusy"><mat-icon>link</mat-icon>{{ 'production.screen-create' | translate }}</button>
+        }
+      </div>
+    }
+    <tb-production-board [overview]="overview" [speed]="chartSpeedData" [output]="chartOutputData"></tb-production-board>
+  </section>
+  <section [hidden]="tab !== 'history' || !overview" class="report-panel">
+    <div class="filters">
+      <mat-form-field class="datetime-field" appearance="outline"><mat-label>{{ 'production.start' | translate }}</mat-label><input matInput [ngModel]="pickerDate(startTime)" (ngModelChange)="startTime = pickerText($event)" [matDatetimepicker]="startPicker"><mat-datetimepicker-toggle matSuffix [for]="startPicker"></mat-datetimepicker-toggle><mat-datetimepicker #startPicker type="datetime" openOnFocus="true"></mat-datetimepicker></mat-form-field>
+      <mat-form-field class="datetime-field" appearance="outline"><mat-label>{{ 'production.end-exclusive' | translate }}</mat-label><input matInput [ngModel]="pickerDate(endTime)" (ngModelChange)="endTime = pickerText($event)" [matDatetimepicker]="endPicker"><mat-datetimepicker-toggle matSuffix [for]="endPicker"></mat-datetimepicker-toggle><mat-datetimepicker #endPicker type="datetime" openOnFocus="true"></mat-datetimepicker></mat-form-field>
+      <mat-form-field appearance="outline"><mat-label>{{ 'production.group' | translate }}</mat-label><mat-select [(ngModel)]="groupBy"><mat-option value="day">{{ 'production.by-day' | translate }}</mat-option><mat-option value="shift">{{ 'production.by-shift' | translate }}</mat-option></mat-select></mat-form-field>
+      <mat-form-field appearance="outline"><mat-label>{{ 'production.shift' | translate }}</mat-label><mat-select [(ngModel)]="shift"><mat-option [value]="null">{{ 'production.all-shifts' | translate }}</mat-option>@for (item of shiftOptions; track item.index) { <mat-option [value]="item.index">{{ item.name }}</mat-option> }</mat-select></mat-form-field>
+      <button mat-flat-button color="primary" (click)="query()" [disabled]="querying">{{ 'production.query' | translate }}</button>
+      <button mat-stroked-button [matMenuTriggerFor]="exportMenu" [disabled]="querying || !report?.rows.length"><mat-icon>download</mat-icon>{{ 'production.export' | translate }}</button>
+      <mat-menu #exportMenu="matMenu"><button mat-menu-item (click)="export('xlsx')">Excel</button><button mat-menu-item (click)="export('csv')">CSV</button></mat-menu>
+      @if (canConfigure) { <button mat-stroked-button (click)="startBackfill()" [disabled]="backfilling || backfill?.status === 'RUNNING'">{{ 'production.backfill' | translate }}</button> }
+    </div>
+    @if (canConfigure) {
+      <p class="hint">{{ 'production.backfill-hint' | translate }}</p>
+      @if (backfill) { <p class="hint" role="status">{{ ('production.backfill-' + backfill.status.toLowerCase()) | translate }} · {{ 'production.processed' | translate }}: {{ backfill.processed | number }} @if (backfill.error) { <span class="warning">{{ backfill.error }}</span> }</p> }
+    }
+    @if (querying) { <mat-progress-bar mode="indeterminate"></mat-progress-bar> }
+    @if (report) {
+      <div class="report-summary"><span>{{ 'production.range-total' | translate }} <strong>{{ reportTotal | number }}</strong> {{ overview.config.unit }}</span><span>{{ displayTime(report.startTs) }} — {{ displayTime(report.endTs) }} · {{ overview.config.timezone }}</span></div>
+      <div class="table-wrap"><table><thead><tr><th>{{ 'production.production-date' | translate }}</th><th>{{ 'production.shift' | translate }}</th><th>{{ 'production.period' | translate }}</th><th class="numeric">{{ 'production.quantity' | translate }}</th><th>{{ 'production.unit' | translate }}</th><th>{{ 'production.status' | translate }}</th><th class="numeric">{{ 'production.resets' | translate }}</th></tr></thead><tbody>
+        @for (row of visibleRows; track row.startTs) {
+          <tr><td>{{ row.productionDate }}</td><td>{{ row.shiftName }}</td><td>{{ displayTime(row.startTs, 'MM-DD HH:mm:ss') }} → {{ displayTime(row.endTs, 'MM-DD HH:mm:ss') }} @if (row.partial) { <span class="status">{{ 'production.partial' | translate }}</span> }</td><td class="numeric">{{ row.status === 'NO_DATA' || row.status === 'NOT_STARTED' ? '—' : (row.quantity | number) }}</td><td>{{ row.unit }}</td><td [class.warning]="row.status === 'INCOMPLETE' || row.status === 'ESTIMATED'">{{ status(row.status) }}</td><td class="numeric">{{ row.resets }}</td></tr>
+        } @empty { <tr><td colspan="7">{{ 'production.no-results' | translate }}</td></tr> }
+      </tbody></table></div>
+      <mat-paginator [length]="report.rows.length" [pageSize]="pageSize" [pageIndex]="pageIndex" [pageSizeOptions]="[25, 50, 100]" (page)="pageIndex = $event.pageIndex; pageSize = $event.pageSize" showFirstLastButtons></mat-paginator>
+      <p class="hint">{{ 'production.range-hint' | translate }} · {{ 'production.data-as-of' | translate }}: {{ displayTime(report.dataAsOf || null) }}</p>
+    }
+  </section>
+  <section [hidden]="tab !== 'settings' || !draft || !canConfigure" class="settings-panel">
+    @if (draft) {
+      <h2>{{ 'production.settings' | translate }}</h2>
+      <p class="hint">{{ 'production.settings-hint' | translate }}</p>
+      <div class="filters">
+        <mat-form-field appearance="outline"><mat-label>{{ 'production.unit' | translate }}</mat-label><input matInput [(ngModel)]="draft.unit" [placeholder]="'production.unit-examples' | translate" maxlength="16" required></mat-form-field>
+        <mat-form-field appearance="outline"><mat-label>{{ 'production.shift-count' | translate }}</mat-label><mat-select [ngModel]="draft.shifts.length" (ngModelChange)="changeShiftCount($event)"><mat-option [value]="2">{{ 'production.two-shifts' | translate }}</mat-option><mat-option [value]="3">{{ 'production.three-shifts' | translate }}</mat-option></mat-select></mat-form-field>
+        <mat-form-field appearance="outline"><mat-label>{{ 'production.schedule-effective-date' | translate }}</mat-label><input matInput [ngModel]="pickerDate(effectiveDate, 'YYYY-MM-DD')" (ngModelChange)="effectiveDate = pickerText($event, 'YYYY-MM-DD')" [matDatetimepicker]="effectivePicker" [required]="scheduleChanged"><mat-datetimepicker-toggle matSuffix [for]="effectivePicker"></mat-datetimepicker-toggle><mat-datetimepicker #effectivePicker type="date" openOnFocus="true"></mat-datetimepicker></mat-form-field>
+      </div>
+      <div class="shift-settings">
+        @for (item of draft.shifts; track $index) {
+          <div><mat-form-field appearance="outline"><mat-label>{{ 'production.shift-name' | translate }}</mat-label><input matInput [(ngModel)]="item.name" maxlength="24" required></mat-form-field><mat-form-field appearance="outline"><mat-label>{{ 'production.start' | translate }}</mat-label><input matInput [ngModel]="pickerDate(item.start, 'HH:mm')" (ngModelChange)="item.start = pickerText($event, 'HH:mm')" [matDatetimepicker]="shiftPicker" required><mat-datetimepicker-toggle matSuffix [for]="shiftPicker"></mat-datetimepicker-toggle><mat-datetimepicker #shiftPicker type="time" openOnFocus="true"></mat-datetimepicker></mat-form-field><span>{{ 'production.end' | translate }}: {{ shiftEnd($index) }}</span></div>
+        }
+      </div>
+      <p class="hint">{{ 'production.day-start-hint' | translate }}: {{ draft.shifts[0].start }} · {{ draft.unit }}/{{ 'production.hour' | translate }}</p>
+      <button mat-flat-button color="primary" (click)="saveSettings()" [disabled]="saving || !draft.unit || (scheduleChanged && !effectiveDate)">{{ 'production.save' | translate }}</button>
+      <button mat-button (click)="resetDraft()">{{ 'production.reset-form' | translate }}</button>
+      <h2 class="history-title">{{ 'production.config-history' | translate }}</h2>
+      <div class="table-wrap"><table><thead><tr><th>{{ 'production.effective-date' | translate }}</th><th>{{ 'production.unit' | translate }}</th><th>{{ 'production.shift' | translate }}</th></tr></thead><tbody>@for (version of settings?.versions || []; track version.effectiveTs) { <tr><td>{{ version.effectiveTs === 0 ? ('production.default-config' | translate) : displayTime(version.effectiveTs) }}</td><td>{{ version.config.unit }}</td><td>@for (item of version.config.shifts; track $index) { <span>{{ item.name }} {{ item.start }}&nbsp;&nbsp;</span> }</td></tr> }</tbody></table></div>
+    }
+  </section>
+</div>

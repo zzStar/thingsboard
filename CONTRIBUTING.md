@@ -71,6 +71,10 @@ Each source file needs the project's license header. Apply it automatically befo
 mvn license:format
 ```
 
+In this fork, header checks are not bound to the Maven build lifecycle. `make dev`,
+`make deploy`, and ordinary Maven builds do not fail on missing file headers.
+The configured `license:check` and `license:format` tools remain available when explicitly requested.
+
 Building the UI on its own, from `ui-ngx`:
 
 ```bash

@@ -48,4 +48,11 @@
                           [active]="versionControlTab.isActive" [entityId]="entity.id" [entityName]="entity.name" [externalEntityId]="entity.externalId || entity.id"></tb-version-control>
     </mat-tab>
   }
+  <mat-tab label="{{ 'production.title' | translate }}">
+    <div class="p-6">
+      <a mat-flat-button color="primary" [routerLink]="['/production']" [queryParams]="{deviceId: entity.id.id}">
+        <mat-icon>bar_chart</mat-icon>{{ 'production.open' | translate }}
+      </a>
+    </div>
+  </mat-tab>
 }

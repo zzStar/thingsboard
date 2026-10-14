@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: BUSL-1.1
 #
 
-.PHONY: dev dev-down dev-logs dev-help deploy deploy-status deploy-logs rollback backup deploy-check
+.PHONY: dev dev-down dev-logs dev-help deploy deploy-status deploy-logs rollback backup deploy-check cache-github cache-base
 export VERSION BUILD FROM_VERSION DEPLOY_HOST RESUME_PUSH
 
 dev:
@@ -23,6 +23,12 @@ dev-help:
 deploy:
 	@bash -c "$$(cat scripts/deploy.sh)" "$(CURDIR)/scripts/deploy.sh" deploy
 
+cache-github:
+	@python3 scripts/cache-github-deps.py
+
+cache-base:
+	@python3 scripts/cache-base-images.py
+
 deploy-status:
 	@bash scripts/deploy.sh status
 
@@ -38,4 +44,6 @@ backup:
 deploy-check:
 	@bash -n scripts/deploy.sh scripts/deploy-remote.sh scripts/smoke-image.sh scripts/push-image.sh deploy/entrypoint.sh
 	@python3 -c "import ast; from pathlib import Path; ast.parse(Path('scripts/registry-login.py').read_text())"
+	@python3 -c "import ast; from pathlib import Path; ast.parse(Path('scripts/cache-github-deps.py').read_text())"
+	@python3 -c "import ast; from pathlib import Path; ast.parse(Path('scripts/cache-base-images.py').read_text())"
 	@POSTGRES_PASSWORD=validation-only APP_IMAGE=validation-only DOMAIN=things.zhigongshulian.com docker compose -f deploy/compose.yml config --quiet

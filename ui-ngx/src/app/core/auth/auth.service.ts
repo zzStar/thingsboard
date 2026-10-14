@@ -213,6 +213,7 @@ export class AuthService {
   }
 
   public gotoDefaultPlace(isAuthenticated: boolean) {
+    if (window.location.pathname.startsWith('/production-screen/')) { return; }
     if (!isMobileApp()) {
       const authState = getCurrentAuthState(this.store);
       const url = this.defaultUrl(isAuthenticated, authState);

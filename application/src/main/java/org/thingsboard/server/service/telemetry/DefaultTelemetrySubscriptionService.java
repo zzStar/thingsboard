@@ -83,6 +83,9 @@ public class DefaultTelemetrySubscriptionService extends AbstractSubscriptionSer
     private final CalculatedFieldQueueService calculatedFieldQueueService;
     private final DeviceStateManager deviceStateManager;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.thingsboard.server.service.production.DeviceProductionService productionService;
+
     private ExecutorService tsCallBackExecutor;
 
     @Value("${sql.ts.value_no_xss_validation:false}")
@@ -157,6 +160,14 @@ public class DefaultTelemetrySubscriptionService extends AbstractSubscriptionSer
             resultFuture = tsService.saveWithoutLatest(tenantId, entityId, request.getEntries(), request.getTtl(), request.isOverwriteValue());
         } else {
             resultFuture = Futures.immediateFuture(TimeseriesSaveResult.EMPTY);
+        }
+
+        if (productionService != null && strategy.saveTimeseries() && entityId.getEntityType() == EntityType.DEVICE
+                && tenantId != null && request.getEntries().stream().anyMatch(entry -> "totalCount".equals(entry.getKey()))) {
+            resultFuture = Futures.transform(resultFuture, result -> {
+                productionService.record(tenantId, new DeviceId(entityId.getId()), request.getEntries(), request.isOverwriteValue());
+                return result;
+            }, tsCallBackExecutor);
         }
 
         addMainCallback(resultFuture, result -> {

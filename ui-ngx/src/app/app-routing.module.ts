@@ -4,6 +4,10 @@ import { NgModule } from '@angular/core';
 import { RouterModule, Routes } from '@angular/router';
 
 const routes: Routes = [
+  { path: 'production-screen/:deviceId',
+    loadChildren: () => import('./modules/home/pages/production/production-screen.module').then(m => m.ProductionScreenModule),
+    data: {title: 'production.screen-title', breadcrumb: {skip: true}}
+  },
   { path: '',
     redirectTo: 'home',
     pathMatch: 'full',

@@ -1,0 +1,24 @@
+<!--
+
+    SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+    SPDX-License-Identifier: Apache-2.0
+
+-->
+<main #page class="production-page production-screen">
+  <header>
+    <div class="screen-headline">
+      <img class="screen-brand" src="assets/zhigong-logo-white.svg" alt="智工物联">
+      <div class="screen-heading"><h1>{{ 'production.screen-title' | translate }}</h1><span class="device-name" [title]="view?.deviceName || ''">{{ view?.deviceName || ('production.overview' | translate) }}</span></div>
+    </div>
+    <div class="header-actions">
+      <div class="screen-clock"><span>{{ date }}</span><time>{{ clock }}</time></div>
+      <button mat-icon-button (click)="fullscreen()" [attr.aria-label]="'production.fullscreen' | translate" [matTooltip]="'production.fullscreen' | translate"><mat-icon>fullscreen</mat-icon></button>
+    </div>
+  </header>
+  @if (loading) { <mat-progress-bar mode="indeterminate"></mat-progress-bar> }
+  @if (message) { <div class="message error" role="alert">{{ message | translate }} @if (updatedTs && view) { <span> · {{ 'production.screen-last-update' | translate }}: {{ displayTime(updatedTs) }}</span> }</div> }
+  @if (!unavailable) {
+    <tb-production-board [overview]="view?.overview" [speed]="view?.speed || []" [output]="view?.output" [connectionLost]="connectionLost" [screenMode]="true"></tb-production-board>
+    @if (!loading && !view) { <p class="hint">{{ 'production.screen-no-snapshot' | translate }}</p> }
+  }
+</main>

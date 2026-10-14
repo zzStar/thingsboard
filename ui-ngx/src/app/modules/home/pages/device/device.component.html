@@ -6,6 +6,11 @@
 
 -->
 <div class="tb-details-buttons xs:flex xs:flex-col">
+  @if (!isEdit && entity?.id?.id && (entityGroup | hasGroupEntityOrGenericPermission: resource.DEVICE: operation.READ_TELEMETRY)) {
+    <a mat-stroked-button color="primary" [routerLink]="['/production']" [queryParams]="{deviceId: entity.id.id}">
+      <mat-icon>bar_chart</mat-icon>{{ 'production.open' | translate }}
+    </a>
+  }
   <button mat-stroked-button color="primary"
     [disabled]="(isLoading$ | async)"
     (click)="onEntityAction($event, 'open')"

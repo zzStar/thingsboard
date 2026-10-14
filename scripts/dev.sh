@@ -18,11 +18,23 @@ LOCKED=false
 fail() { echo "错误：$*" >&2; exit 1; }
 cleanup() {
     local result=$?
-    trap - EXIT INT TERM
+    trap - EXIT
+    # 清理期间连续 Ctrl+C 或终端挂断不能再次中断清理，留下锁目录。
+    trap '' INT TERM HUP
     for pid in "$FRONTEND_PID" "$BACKEND_PID"; do
         if [[ -n "$pid" ]]; then kill "$pid" 2>/dev/null || true; fi
     done
+    local started=$SECONDS running
+    while ((SECONDS - started < 20)); do
+        running=false
+        for pid in "$FRONTEND_PID" "$BACKEND_PID"; do
+            if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then running=true; fi
+        done
+        [[ "$running" == true ]] || break
+        sleep 1
+    done
     for pid in "$FRONTEND_PID" "$BACKEND_PID"; do
+        if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then kill -KILL "$pid" 2>/dev/null || true; fi
         if [[ -n "$pid" ]]; then wait "$pid" 2>/dev/null || true; fi
     done
     if [[ "$LOCKED" == true ]]; then rmdir "$STATE/lock"; fi
@@ -31,6 +43,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 if ! mkdir "$STATE/lock" 2>/dev/null; then
     fail '已有 make dev 在运行。如果上次进程被强制终止，请确认它已退出，再删除 .dev/lock。'

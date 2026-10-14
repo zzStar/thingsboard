@@ -109,6 +109,7 @@ export enum MenuId {
   alarms = 'alarms',
   alarm_rules = 'alarm_rules',
   dashboards = 'dashboards',
+  production = 'production',
   entities = 'entities',
   devices = 'devices',
   assets = 'assets',
@@ -704,6 +705,17 @@ export const menuSectionMap = new Map<MenuId, MenuSection>([
       path: '/dashboards',
       icon: 'dashboards',
       outlinedIcon: 'mdi:view-dashboard-outline'
+    }
+  ],
+  [
+    MenuId.production,
+    {
+      id: MenuId.production,
+      name: 'production.title',
+      type: 'link',
+      path: '/production',
+      icon: 'bar_chart',
+      outlinedIcon: 'bar_chart'
     }
   ],
   [
@@ -2020,6 +2032,7 @@ export const defaultUserMenuMap = new Map<Authority, MenuReference[]>([
               {id: MenuId.dashboard_shared}
             ]
           },
+          {id: MenuId.production},
           {
             id: MenuId.alarms_center,
             pages: [
@@ -2225,6 +2238,7 @@ export const defaultUserMenuMap = new Map<Authority, MenuReference[]>([
               {id: MenuId.dashboard_shared}
             ]
           },
+          {id: MenuId.production},
           {
             id: MenuId.alarms_center,
             pages: [

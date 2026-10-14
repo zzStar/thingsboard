@@ -21,6 +21,7 @@ export class TranslateDefaultLoader implements TranslateLoader {
   }
 
   getTranslation(lang: string): Observable<TranslationObject> {
+    if (window.location.pathname.startsWith('/production-screen/')) { return this.loadSystemLang(lang); }
     let tasks: Array<Observable<TranslationObject>>
     if (this.isSetupCompleted) {
       if (this.isAuthenticated) {

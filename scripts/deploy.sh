@@ -16,6 +16,7 @@ ACTION=${1:-deploy}
 BUILD=${BUILD:-1}
 VERSION=${VERSION:-}
 FROM_VERSION=${FROM_VERSION:-}
+MODE=${MODE:-single}
 RESUME_PUSH=${RESUME_PUSH:-0}
 BUILD_BASE_IMAGE=${BUILD_BASE_IMAGE:-m.daocloud.io/docker.io/library/maven:3.9.11-eclipse-temurin-25}
 RUNTIME_BASE_IMAGE=${RUNTIME_BASE_IMAGE:-m.daocloud.io/docker.io/library/eclipse-temurin:25-jre}
@@ -25,11 +26,12 @@ fail() { echo "ERROR: $*" >&2; exit 1; }
 if [[ "$ACTION" == deploy && "$RESUME_PUSH" == 1 ]]; then
   [[ "$BUILD" == 0 && -n "$VERSION" ]] || fail 'RESUME_PUSH=1 requires BUILD=0 and an explicit VERSION'
 fi
-if [[ "$ACTION" == status || "$ACTION" == logs ]]; then
+[[ "$MODE" == single || "$MODE" == maintenance ]] || fail 'MODE must be single or maintenance; rolling requires a validated cluster.'
+if [[ "$ACTION" == status || "$ACTION" == logs || "$ACTION" == verify ]]; then
   "${SSH[@]}" "bash /opt/zhigong-things/deploy-remote.sh $ACTION"
   exit
 fi
-[[ "$ACTION" == deploy || "$ACTION" == rollback || "$ACTION" == backup ]] || fail 'Unknown action'
+[[ "$ACTION" == deploy || "$ACTION" == rollback || "$ACTION" == backup || "$ACTION" == plan ]] || fail 'Unknown action'
 mkdir -p .dev
 if [[ "$ACTION" == deploy && -z "$VERSION" ]]; then
   VERSION=$(TZ=Asia/Shanghai date +%Y%m%d-%H%M%S)-$(git rev-parse --short HEAD)
@@ -38,7 +40,7 @@ if [[ "$ACTION" != backup ]]; then
   [[ "$VERSION" =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,100}$ ]] || fail 'Supply a valid VERSION'
 fi
 [[ -z "$FROM_VERSION" || "$FROM_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || fail 'Invalid FROM_VERSION'
-if [[ "$ACTION" == deploy ]]; then
+if [[ "$ACTION" == deploy || "$ACTION" == plan ]]; then
   for cmd in docker python3 ssh tar; do command -v "$cmd" >/dev/null || fail "Missing command $cmd"; done
   python3 - "$DOMAIN" "$IP" <<'PY'
 import socket,sys
@@ -49,13 +51,18 @@ if addresses!={sys.argv[2]}:
              '\n请在域名 DNS 控制台删除或修正其他 A/AAAA 记录，等待缓存过期后重新执行 make deploy。')
 print('DNS verified')
 PY
-  "${SSH[@]}" 'test "$(uname -m)" = x86_64 && docker info >/dev/null && docker compose version >/dev/null && command -v flock >/dev/null && command -v curl >/dev/null' || fail 'Server prerequisites failed'
+  "${SSH[@]}" 'test "$(uname -m)" = x86_64 && docker info >/dev/null && docker compose version >/dev/null && command -v flock >/dev/null && command -v curl >/dev/null && command -v python3 >/dev/null' || fail 'Server prerequisites failed'
   docker info >/dev/null
   docker buildx version >/dev/null
   if [[ "$BUILD" == 1 ]]; then
     DOCKER_MEMORY=$(docker info --format '{{.MemTotal}}')
     (( DOCKER_MEMORY >= 7 * 1024 * 1024 * 1024 )) || fail 'Docker 构建内存不足：请在 Docker Desktop Settings → Resources → Memory 分配至少 8 GiB，建议 10–12 GiB。'
     echo '生产构建：Node 堆上限 4 GiB，Angular workers=2，Maven 堆上限 1 GiB。建议 Docker 分配 10–12 GiB 内存，并停止其他高内存容器。'
+  fi
+  if [[ "$ACTION" == plan ]]; then
+    [[ -n "$VERSION" ]] || fail 'deploy-plan requires VERSION of an already staged image'
+    "${SSH[@]}" "bash /opt/zhigong-things/deploy-remote.sh plan '$VERSION' '$FROM_VERSION' '$MODE'"
+    exit
   fi
   python3 scripts/registry-login.py "$REGISTRY" local
   python3 scripts/registry-login.py "$REGISTRY" "$HOST"
@@ -72,6 +79,9 @@ PY
 )
     SOURCE=$(git rev-parse HEAD)
     [[ -z "$(git status --porcelain)" ]] || SOURCE="$SOURCE-dirty"
+    COMPATIBILITY=$(python3 scripts/deploy-policy.py validate deploy/release-policy.json application/src/main/resources/production-schema.sql)
+    POLICY_HASH=$(shasum -a 256 deploy/release-policy.json | awk '{print $1}')
+    PRODUCTION_SCHEMA=$(shasum -a 256 application/src/main/resources/production-schema.sql | awk '{print $1}')
     echo '准备锁定版本的 GitHub 依赖缓存…'
     GITHUB_DEPS_CACHE=$(python3 scripts/cache-github-deps.py)
     echo "构建基础镜像：$BUILD_BASE_IMAGE"
@@ -87,6 +97,8 @@ PY
       --build-arg "BUILD_BASE_IMAGE=production-build-base" \
       --build-arg "RUNTIME_BASE_IMAGE=production-runtime-base" \
       --build-arg "APP_SCHEMA=$SCHEMA" --build-arg "APP_SOURCE=$SOURCE" \
+      --build-arg "APP_COMPATIBILITY=$COMPATIBILITY" --build-arg "APP_POLICY_HASH=$POLICY_HASH" \
+      --build-arg "APP_PRODUCTION_SCHEMA=$PRODUCTION_SCHEMA" \
       --tag "$REPO:$VERSION" --load --progress plain . \
       2>&1 | tee ".dev/deploy-build-$VERSION.log"
     bash scripts/smoke-image.sh "$REPO:$VERSION" "$SCHEMA"
@@ -103,9 +115,24 @@ PY
   docker buildx imagetools inspect "$REPO:$VERSION" >/dev/null
   # Stage configuration in an immutable version directory; preserve existing release files on retries.
   "${SSH[@]}" "mkdir -p /opt/zhigong-things/releases/$VERSION"
-  tar -cf - deploy/compose.yml deploy/Caddyfile scripts/deploy-remote.sh | \
+  tar -cf - deploy/compose.yml deploy/Caddyfile deploy/Caddyfile.maintenance scripts/deploy-remote.sh scripts/deploy-policy.py scripts/deploy-job.sh | \
     "${SSH[@]}" "tar -xf - -C /opt/zhigong-things/releases/$VERSION"
-  "${SSH[@]}" "cd /opt/zhigong-things/releases/$VERSION && test -f compose.yml || { cp deploy/compose.yml compose.yml; cp deploy/Caddyfile Caddyfile; }"
-  "${SSH[@]}" "cp /opt/zhigong-things/releases/$VERSION/scripts/deploy-remote.sh /opt/zhigong-things/deploy-remote.sh"
+  "${SSH[@]}" "cd /opt/zhigong-things/releases/$VERSION && test -f compose.yml || { cp deploy/compose.yml compose.yml; cp deploy/Caddyfile Caddyfile; }; test -f Caddyfile.maintenance || cp deploy/Caddyfile.maintenance Caddyfile.maintenance"
+  "${SSH[@]}" "for file in deploy-remote.sh deploy-policy.py deploy-job.sh; do cp /opt/zhigong-things/releases/$VERSION/scripts/\$file /opt/zhigong-things/\$file.tmp && mv /opt/zhigong-things/\$file.tmp /opt/zhigong-things/\$file || exit 1; done"
 fi
-"${SSH[@]}" "bash -c \"\$(cat /opt/zhigong-things/deploy-remote.sh)\" /opt/zhigong-things/deploy-remote.sh $ACTION ${VERSION:-''} ${FROM_VERSION:-''}"
+JOB=$("${SSH[@]}" "bash /opt/zhigong-things/deploy-job.sh start '$ACTION' '$VERSION' '$FROM_VERSION' '$MODE'")
+[[ "$JOB" =~ ^[a-zA-Z0-9_.-]+$ ]] || fail 'Invalid remote deployment job identifier'
+echo "Remote job: $JOB (continues if SSH disconnects). Log: /opt/zhigong-things/jobs/$JOB/output.log"
+LAST_OUTPUT=
+while true; do
+  if ! OUTPUT=$("${SSH[@]}" "bash /opt/zhigong-things/deploy-job.sh poll '$JOB'"); then
+    fail "SSH interrupted; remote job continues. Run make deploy-status and inspect job $JOB before retrying."
+  fi
+  if [[ "$OUTPUT" != "$LAST_OUTPUT" ]]; then echo "$OUTPUT"; LAST_OUTPUT=$OUTPUT; fi
+  if [[ "$OUTPUT" == DONE\ * ]]; then
+    RESULT=${OUTPUT%%$'\n'*}; RESULT=${RESULT#DONE }
+    [[ "$RESULT" == 0 ]] || fail "Remote job failed ($RESULT); inspect deploy-status and its log."
+    break
+  fi
+  sleep 5
+done

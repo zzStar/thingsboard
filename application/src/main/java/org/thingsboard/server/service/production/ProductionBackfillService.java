@@ -6,6 +6,8 @@ import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.thingsboard.common.util.ThingsBoardThreadFactory;
@@ -21,6 +23,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ScheduledExecutorService;
 
 import static org.thingsboard.server.service.production.ProductionModels.*;
 
@@ -34,6 +37,47 @@ public class ProductionBackfillService implements AutoCloseable {
     private final DeviceProductionService production;
     private final Semaphore capacity = new Semaphore(2);
     private final ExecutorService executor = Executors.newFixedThreadPool(2, ThingsBoardThreadFactory.forName("production-backfill"));
+    private final ScheduledExecutorService resumeExecutor = Executors.newSingleThreadScheduledExecutor(
+            ThingsBoardThreadFactory.forName("production-backfill-resume"));
+    private volatile boolean closing;
+
+    // Single-node deployment: interrupted jobs retain their exact cursor and job ID.
+    // Cluster task leasing must be implemented before enabling multiple application nodes.
+    @EventListener(ApplicationReadyEvent.class)
+    public void resumeOnStartup() {
+        jdbc.update("UPDATE production_backfill SET status='INTERRUPTED' WHERE status='RUNNING'");
+        resumeExecutor.scheduleWithFixedDelay(() -> {
+            try { resumeInterrupted(); }
+            catch (Exception e) { log.warn("Cannot resume production backfill yet", e); }
+        }, 1, 10, TimeUnit.SECONDS);
+    }
+
+    void resumeInterrupted() {
+        if (closing) return;
+        var jobs = jdbc.query("SELECT b.*,d.tenant_id FROM production_backfill b JOIN device d ON d.id=b.device_id "
+                        + "WHERE b.status='INTERRUPTED' ORDER BY b.updated_ts LIMIT 2",
+                (rs, n) -> new Resume(new TenantId(rs.getObject("tenant_id", UUID.class)),
+                        new DeviceId(rs.getObject("device_id", UUID.class)), rs.getObject("job_id", UUID.class),
+                        new BackfillRequest(rs.getLong("start_ts"), rs.getLong("end_ts")),
+                        rs.getLong("cursor_ts"), rs.getLong("processed")));
+        for (Resume job : jobs) {
+            if (!capacity.tryAcquire()) return;
+            try {
+                int claimed = jdbc.update("UPDATE production_backfill SET status='RUNNING',updated_ts=?,error=NULL "
+                                + "WHERE device_id=? AND job_id=? AND status='INTERRUPTED'",
+                        System.currentTimeMillis(), job.device().getId(), job.job());
+                if (claimed == 0) { capacity.release(); continue; }
+                executor.submit(() -> run(job.tenant(), job.device(), job.job(), job.request(), job.cursor(), job.processed()));
+            } catch (RuntimeException e) {
+                capacity.release();
+                jdbc.update("UPDATE production_backfill SET status='INTERRUPTED' WHERE device_id=? AND job_id=?",
+                        job.device().getId(), job.job());
+                throw e;
+            }
+        }
+    }
+
+    private record Resume(TenantId tenant, DeviceId device, UUID job, BackfillRequest request, long cursor, long processed) {}
 
     public Backfill get(DeviceId device) {
         var rows = jdbc.query("SELECT * FROM production_backfill WHERE device_id=?", (rs, n) -> {
@@ -46,6 +90,7 @@ public class ProductionBackfillService implements AutoCloseable {
     }
 
     public Backfill start(TenantId tenant, DeviceId device, BackfillRequest request) {
+        if (closing) throw new IllegalArgumentException("服务正在更新，请稍后重试");
         long now = System.currentTimeMillis();
         if (request.startTs() < 0 || request.endTs() <= request.startTs() || request.endTs() > now
                 || request.endTs() - request.startTs() > 31L * 86400000) {
@@ -61,7 +106,7 @@ public class ProductionBackfillService implements AutoCloseable {
                             + "WHERE production_backfill.status<>'RUNNING' OR production_backfill.updated_ts<?",
                     device.getId(), job, request.startTs(), request.endTs(), request.startTs(), now, now - 300_000);
             if (changed == 0) throw new IllegalArgumentException("该设备已有回算任务正在执行");
-            executor.submit(() -> run(tenant, device, job, request));
+            executor.submit(() -> run(tenant, device, job, request, request.startTs(), 0));
         } catch (RuntimeException e) {
             capacity.release();
             jdbc.update("UPDATE production_backfill SET status='FAILED',updated_ts=? WHERE device_id=? AND job_id=?", now, device.getId(), job);
@@ -75,8 +120,7 @@ public class ProductionBackfillService implements AutoCloseable {
                 .get(30, TimeUnit.SECONDS);
     }
 
-    private void run(TenantId tenant, DeviceId device, UUID job, BackfillRequest request) {
-        long cursor = request.startTs(), processed = 0;
+    private void run(TenantId tenant, DeviceId device, UUID job, BackfillRequest request, long cursor, long processed) {
         try {
             // Fetch a preceding baseline and a following endpoint so a clipped range can be calculated.
             production.record(tenant, device, readings(tenant, device, 0, cursor, 1, "DESC"), false);
@@ -103,13 +147,27 @@ public class ProductionBackfillService implements AutoCloseable {
         } catch (Exception e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             log.warn("Production backfill failed for device {}", device, e);
-            jdbc.update("UPDATE production_backfill SET status='FAILED',error=?,updated_ts=? WHERE device_id=? AND job_id=?",
-                    "回算失败，请重试；已完成的数据不会重复计数", System.currentTimeMillis(), device.getId(), job);
+            jdbc.update("UPDATE production_backfill SET status=?,error=?,updated_ts=? WHERE device_id=? AND job_id=?",
+                    closing || e instanceof InterruptedException ? "INTERRUPTED" : "FAILED",
+                    "回算中断；重启续算或重试不会重复计数", System.currentTimeMillis(), device.getId(), job);
         } finally {
             capacity.release();
         }
     }
 
     @PreDestroy
-    public void close() { executor.shutdownNow(); }
+    public void close() {
+        closing = true;
+        resumeExecutor.shutdownNow();
+        executor.shutdown();
+        try {
+            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+                executor.awaitTermination(10, TimeUnit.SECONDS);
+            }
+        } catch (InterruptedException e) {
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
 }

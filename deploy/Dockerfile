@@ -39,13 +39,19 @@ RUN --mount=type=cache,target=/root/.m2/repository \
 FROM ${RUNTIME_BASE_IMAGE}
 ARG APP_SCHEMA
 ARG APP_SOURCE
-LABEL com.zhigong.schema=$APP_SCHEMA org.opencontainers.image.revision=$APP_SOURCE
+ARG APP_COMPATIBILITY
+ARG APP_POLICY_HASH
+ARG APP_PRODUCTION_SCHEMA
+LABEL com.zhigong.schema=$APP_SCHEMA org.opencontainers.image.revision=$APP_SOURCE \
+      com.zhigong.compatibility=$APP_COMPATIBILITY com.zhigong.release-policy=$APP_POLICY_HASH \
+      com.zhigong.production-schema=$APP_PRODUCTION_SCHEMA
 RUN apt-get update && apt-get install -y --no-install-recommends curl fontconfig fonts-dejavu-core libharfbuzz0b \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 things && useradd --uid 10001 --gid things --home-dir /data things \
     && mkdir /app /data && chown things:things /data
 COPY --from=build /out/ /app/
 COPY deploy/entrypoint.sh /app/entrypoint.sh
+COPY deploy/release-policy.json /app/release-policy.json
 RUN chmod 755 /app/entrypoint.sh
 USER 10001:10001
 WORKDIR /data

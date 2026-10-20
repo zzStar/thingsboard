@@ -71,9 +71,10 @@ public class ProductionScreenService {
 
     public ScreenView view(DeviceId device, String key) throws Exception {
         if (key == null || !key.matches("[A-Za-z0-9_-]{43}")) throw unavailable();
-        var links = jdbc.query("SELECT s.access_key, s.tenant_id, COALESCE(NULLIF(d.label, ''), d.name) AS device_name " +
-                        "FROM production_screen_link s JOIN device d ON d.id=s.device_id AND d.tenant_id=s.tenant_id WHERE s.device_id=?",
-                (rs, n) -> new Access(rs.getString(1), new TenantId(rs.getObject(2, java.util.UUID.class)), rs.getString(3)), device.getId());
+        var links = jdbc.query("SELECT s.access_key, s.tenant_id, COALESCE(NULLIF(d.label, ''), d.name) AS device_name, COALESCE(c.title, '') AS customer_name " +
+                        "FROM production_screen_link s JOIN device d ON d.id=s.device_id AND d.tenant_id=s.tenant_id " +
+                        "LEFT JOIN customer c ON c.id=d.customer_id AND c.tenant_id=d.tenant_id WHERE s.device_id=?",
+                (rs, n) -> new Access(rs.getString(1), new TenantId(rs.getObject(2, java.util.UUID.class)), rs.getString(3), rs.getString(4)), device.getId());
         if (links.isEmpty() || !MessageDigest.isEqual(links.getFirst().key().getBytes(StandardCharsets.US_ASCII),
                 key.getBytes(StandardCharsets.US_ASCII))) throw unavailable();
         Access access = links.getFirst();
@@ -97,12 +98,12 @@ public class ProductionScreenService {
             speedUnavailable = true;
             log.warn("Unable to load production speed trend for device {}: {}", device, e.toString());
         }
-        return new ScreenView(access.deviceName(), overview, speed, output, speedUnavailable);
+        return new ScreenView(access.deviceName(), access.customerName(), overview, speed, output, speedUnavailable);
     }
 
     private ThingsboardRuntimeException unavailable() {
         return new ThingsboardRuntimeException("产量大屏链接不可用", ThingsboardErrorCode.ITEM_NOT_FOUND);
     }
 
-    private record Access(String key, TenantId tenant, String deviceName) {}
+    private record Access(String key, TenantId tenant, String deviceName, String customerName) {}
 }

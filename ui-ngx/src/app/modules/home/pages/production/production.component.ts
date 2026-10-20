@@ -29,7 +29,7 @@ import { ProductionDatetimeAdapter } from './production-datetime-adapter';
 export class ProductionComponent implements OnInit, OnDestroy {
   @ViewChild('page', {static: true}) page: ElementRef<HTMLElement>;
   readonly deviceType = EntityType.DEVICE;
-  readonly canConfigure = getCurrentAuthUser(this.store).authority === Authority.TENANT_ADMIN;
+  readonly canConfigure = [Authority.TENANT_ADMIN, Authority.CUSTOMER_USER].includes(getCurrentAuthUser(this.store).authority);
   deviceId: string;
   selectedDevice: EntityId;
   deviceName = '';

@@ -23,7 +23,7 @@ public final class ProductionModels {
     public record Backfill(long startTs, long endTs, long cursorTs, long processed, String status, String error) {}
     public record ScreenLink(String key, long createdTs) {}
     public record SpeedPoint(long ts, String value) {}
-    public record ScreenView(String deviceName, Overview overview, List<SpeedPoint> speed, Report output, boolean speedUnavailable) {}
+    public record ScreenView(String deviceName, String customerName, Overview overview, List<SpeedPoint> speed, Report output, boolean speedUnavailable) {}
     public record Sample(long ts, long counter, Long previousTs, long delta, boolean reset, boolean gap) {}
     public record Period(long configTs, String productionDate, int shiftIndex, String shiftName,
                          String unit, String timezone, long startTs, long endTs) {}

@@ -3,6 +3,13 @@
 -- SPDX-License-Identifier: Apache-2.0
 --
 
+CREATE TABLE IF NOT EXISTS production_schema_settings (
+    id integer PRIMARY KEY CHECK (id = 1),
+    schema_version integer NOT NULL
+);
+INSERT INTO production_schema_settings(id,schema_version) VALUES (1,2)
+    ON CONFLICT (id) DO UPDATE SET schema_version=EXCLUDED.schema_version;
+
 CREATE TABLE IF NOT EXISTS production_device (
     device_id uuid PRIMARY KEY REFERENCES device(id) ON DELETE CASCADE,
     tenant_id uuid NOT NULL,
@@ -64,4 +71,20 @@ CREATE TABLE IF NOT EXISTS production_backfill (
     status varchar(16) NOT NULL,
     updated_ts bigint NOT NULL,
     error varchar(256)
+);
+-- Durable repair of raw telemetry saved before a process stopped or calculation failed.
+CREATE TABLE IF NOT EXISTS production_repair (
+    device_id uuid PRIMARY KEY REFERENCES device(id) ON DELETE CASCADE,
+    start_ts bigint NOT NULL,
+    end_ts bigint NOT NULL,
+    cursor_ts bigint NOT NULL,
+    updated_ts bigint NOT NULL,
+    retry_ts bigint NOT NULL DEFAULT 0,
+    attempts integer NOT NULL DEFAULT 0,
+    status varchar(16) NOT NULL DEFAULT 'PENDING'
+);
+CREATE INDEX IF NOT EXISTS production_repair_pending_idx ON production_repair(status, retry_ts, updated_ts);
+CREATE TABLE IF NOT EXISTS production_repair_state (
+    id integer PRIMARY KEY CHECK (id = 1),
+    heartbeat_ts bigint NOT NULL
 );

@@ -1,0 +1,14 @@
+{$DOMAIN} {
+    encode gzip
+    header Retry-After "30"
+    header Cache-Control "no-store"
+    @api path /api /api/*
+    handle @api {
+        header Content-Type application/json
+        respond `{"errorCode":2,"message":"服务更新中，请稍后重试","status":503}` 503
+    }
+    handle {
+        header Content-Type "text/html; charset=utf-8"
+        respond "<!doctype html><html lang='zh-CN'><meta charset='utf-8'><meta name='viewport' content='width=device-width'><title>智工物联更新中</title><body style='font-family:sans-serif;text-align:center;padding:15vh 1em;background:#f3f6fb;color:#193d70'><h1>服务更新中</h1><p>正在切换版本，请稍后刷新。设备采集恢复后会继续更新。</p></body></html>" 503
+    }
+}

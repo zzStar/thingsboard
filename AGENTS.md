@@ -191,3 +191,30 @@
 - 已通过4项查询边界/自定义上限/大范围测试与7项Spring真实接口测试（平台限制350），覆盖用户具体时间范围、24小时和匿名大屏，11项全通过、diff检查通过。仅后端变更，未重建前端、发布镜像或部署服务器；日志.dev/production-speed-interval-tests.log。
 
 - 2026-10-14 修复匿名产量大屏断连空白：原快照速度趋势失败会使全接口失败，首次加载又仅在有完整view时渲染。现速度趋势失败/5秒超时返回speedUnavailable标记与已落库概览/历史；保留同一生产日已有曲线。前端设备断报显示等待上报提示，过期速度显示不可用，历史保留；每次成功保存浏览器最近快照（按设备与密钥SHA-256隔离、不存原密钥），503/超时及刷新恢复快照，显示完整上次更新时间，5秒自动重试。无缓存且API不可达时展示框架与“—”，不虚构0；404停用/重置清除视图和缓存并停止轮询。语言加载期间提示使用翻译管道，避免首次失败显示翻译键。24项生产/PostgreSQL/Spring测试、缓存异常/隔离验证、最终生产Angular构建及定向ESLint通过；浏览器本地模拟验证断报、503刷新历史、首次失败框架、自动恢复、速度部分失败、404清除，1920×1080无溢出，截图.dev/production-screen-offline-preview.jpg。未发布或部署。
+
+
+## 低中断更新设计（2026-10-15）
+
+- 用户要求先设计详细方案，已记录 docs/UPDATE-AVAILABILITY.md，docs/DEPLOYMENT.md 添加入口。优先单机在线备份、发布分类/状态恢复、设备缓存补报及遥测缺口修复；扩容后按集群方式引入持久队列/共享缓存、HTTP与MQTT稳定入口，逐节点更新。
+- 官方schema相同不代表产量扩展、数据/API/消息格式可回退；需要兼容清单。MQTT/WS旧连接不能原地迁移，要求重连和补报；内存队列不能承诺数据不丢。4核8GiB只是队列/缓存外置时双应用同机的压测起点，非已验证容量。
+- 本轮仅文档设计和源码核对，未改脚本/应用、未连接服务器、未购买资源、未创建自动任务或部署。设计中新命令及参数尚未实现。
+
+## 单机低中断更新落地（2026-10-15）
+
+- 用户要求持续完成落地，明天自行线上部署。本轮保持make deploy一键入口；默认single，兼容更新先在线pg_dump再维护切换，unknown旧镜像自动maintenance/停止后最终备份，禁止新写入后的猜测回退。已审阅历史digest 4386f408...及匹配兼容策略允许应用回退，数据库不覆盖。
+- 新增deploy/release-policy.json及镜像校验label、SQL指纹/产量版本2；PG/Caddy基础参数、应用数据库/卷/端口/架构变化、实际容器/current不一致、同版本不同digest、未来schema在停止前拒绝。只替换应用，PG不重建。Caddy迁移到稳定目录首次可能重建，以后reload；维护返回JSON503/Retry-After/no-store。
+- 发布采用远端nohup后台job，SSH中断继续；脚本与helper快照到jobs/<id>，日志/result持久化，deployment.state原子记录阶段。中断重试先核对/恢复，迁移未知状态要求人工恢复。新增make deploy-plan（已暂存候选）、deploy-verify、deploy-test和deploy-test-services；rolling拒绝，未伪装成集群。
+- 产量新增持久repair任务，启动扫最近24小时原始totalCount（不限于样本尾部），实时计算失败记录精确范围；100条/批、单worker、源5秒超时/30秒退避。读取源前记录设备revision，持设备锁核对后按原始数据修复缺失/失败覆盖，版本冲突重读，避免旧快照覆盖实时新计算。回算INTERRUPTED保留job/cursor自动续跑，单节点适用。
+- 20项发布故障测试、40项后端回归及10项最新修复专项通过（后两组有重叠）；真实Caddy切换与PG18完整恢复通过；make deploy-check/diff通过。正式linux/amd64 Dockerfile构建成功（Maven6分07秒），最终本地镜像thingsboard-update-validation:20261015-final独立空库/schema2/HTTP/MQTT smoke通过。
+- 验证日志.dev/update-*-final-*.log等，详见docs/UPDATE-VALIDATION.md；操作docs/UPDATE-RUNBOOK.md。未连接生产服务器、未推送/部署、未改设备固件、未引入Kafka/双节点或创建定时任务。设备未上传/内存队列未落库消息仍不能凭空恢复；单机不是零停机。下一步由用户make deploy并现场核对设备遥测、大屏及实际时长。
+
+## 大屏客户标题（2026-10-16）
+
+- 用户要求/production-screen/移除左上角Logo，将主标题改为设备归属客户的名称。已移除Logo及分隔线，保留设备名称副标题、蓝色标题栏与时钟；长客户名省略并提供完整title提示。匿名快照新增customerName，按device.customer_id关联同租户customer.title，未分配返回空字符串、界面显示“未分配客户”；旧缓存缺字段显示加载提示，客户改名/归属变化下次5秒轮询更新，现有链接继续有效。无数据库结构变更。
+- 22项PostgreSQL服务/Spring接口测试通过，新增客户归属、改名、更换归属、未分配及跨租户隔离验证；生产Angular构建与定向ESLint通过。浏览器使用本地模拟接口核对标题、Logo及分隔线移除、未分配提示、1280×720/1920×1080满屏无溢出，控制台无错误。预览截图.dev/production-screen-customer-preview.jpg为测试数据，未发布/部署服务器。
+
+## 客户产量功能与角色授权（2026-10-20）
+
+- 用户要求普通客户用户可以使用与管理员相同的设备产量功能，随后明确询问是否可通过权限配置实现。已去掉前端canConfigure和6个后端管理接口的TENANT_ADMIN身份硬限制，允许CUSTOMER_USER；继续使用现有设备RBAC校验，不自动给客户所有设备权限、不新增绕过权限的设备列表接口。单位/班次保存要求WRITE_ATTRIBUTES，回算发起要求WRITE_TELEMETRY，链接管理要求READ_TELEMETRY+WRITE_ATTRIBUTES，查询/导出要求READ_TELEMETRY，选择设备要求READ。
+- 后续只需给客户用户组配置“组”角色，目标客户设备组，操作包含READ、READ_TELEMETRY、WRITE_ATTRIBUTES、WRITE_TELEMETRY即可完整使用；Customer Administrator角色仍是CUSTOMER_USER身份，本次修改使其不再被身份硬拦截。无权限/只读角色、跨客户/跨租户设备及受限租户管理员权限继续受原RBAC控制。
+- 12项Spring真实接口测试通过，包含普通客户配置组角色后设备选择/单位及三班设置/历史查询/速度/真实异步回算/永久链接生成读取重置停用、只读写入拒绝、其他客户与租户未分配设备隔离、跨租户及受限管理员回归。生产前端构建和定向ESLint通过；浏览器以模拟CUSTOMER_USER验证设置保存、回算、大屏链接入口/生成，最终控制台无错误，截图.dev/production-customer-role-preview.jpg为测试数据。本轮未修改生产服务器权限、未发布或部署。该权限口径取代此前“仅租户管理员可操作”的产量说明。

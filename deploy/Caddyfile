@@ -1,4 +1,7 @@
 {$DOMAIN} {
     encode gzip
-    reverse_proxy thingsboard:8080
+    reverse_proxy thingsboard:8080 {
+        lb_try_duration 3s
+        stream_close_delay 2m
+    }
 }

@@ -8,6 +8,7 @@ export interface ProductionBackfill { startTs: number; endTs: number; cursorTs: 
 export interface ProductionScreenLink { key: string; createdTs: number; }
 export interface ProductionScreenView {
   deviceName: string; overview: ProductionOverview; speed: Array<{ts: number; value: string}>; output: ProductionReport;
+  customerName?: string | null;
   speedUnavailable?: boolean;
 }
 export interface ProductionRow {

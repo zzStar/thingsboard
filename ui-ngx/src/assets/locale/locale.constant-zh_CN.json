@@ -14521,6 +14521,8 @@
     "backfill-interrupted": "回算已中断，可重新执行",
     "processed": "已处理读数",
     "screen-title": "设备产量大屏",
+    "screen-no-customer": "未分配客户",
+    "screen-customer-loading": "客户名称加载中",
     "screen-link": "大屏链接",
     "screen-link-hint": "每台设备一个链接，无需登录，长期有效。重置或停用后旧链接失效。",
     "screen-create": "生成大屏链接",

@@ -45,14 +45,14 @@ public class DeviceProductionController extends BaseController {
     private long maxTsIntervals = 700;
 
     @GetMapping("/screen-link")
-    @PreAuthorize("hasAuthority('TENANT_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('TENANT_ADMIN', 'CUSTOMER_USER')")
     public ScreenLink screenLink(@PathVariable String deviceId) throws ThingsboardException {
         Device device = screenDevice(deviceId);
         return screens.link(device.getTenantId(), device.getId());
     }
 
     @PostMapping("/screen-link")
-    @PreAuthorize("hasAuthority('TENANT_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('TENANT_ADMIN', 'CUSTOMER_USER')")
     public ScreenLink createScreenLink(@PathVariable String deviceId, @RequestParam(defaultValue = "false") boolean rotate)
             throws ThingsboardException {
         Device device = screenDevice(deviceId);
@@ -60,7 +60,7 @@ public class DeviceProductionController extends BaseController {
     }
 
     @DeleteMapping("/screen-link")
-    @PreAuthorize("hasAuthority('TENANT_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('TENANT_ADMIN', 'CUSTOMER_USER')")
     public void revokeScreenLink(@PathVariable String deviceId) throws ThingsboardException {
         Device device = screenDevice(deviceId);
         screens.revoke(device.getTenantId(), device.getId());
@@ -73,14 +73,14 @@ public class DeviceProductionController extends BaseController {
     }
 
     @GetMapping("/backfill")
-    @PreAuthorize("hasAuthority('TENANT_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('TENANT_ADMIN', 'CUSTOMER_USER')")
     public Backfill backfill(@PathVariable String deviceId) throws ThingsboardException {
         Device device = device(deviceId, Operation.READ_TELEMETRY);
         return backfills.get(device.getId());
     }
 
     @PostMapping("/backfill")
-    @PreAuthorize("hasAuthority('TENANT_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('TENANT_ADMIN', 'CUSTOMER_USER')")
     public Backfill startBackfill(@PathVariable String deviceId, @RequestBody BackfillRequest request) throws ThingsboardException {
         Device device = device(deviceId, Operation.WRITE_TELEMETRY);
         return backfills.start(device.getTenantId(), device.getId(), request);
@@ -98,7 +98,7 @@ public class DeviceProductionController extends BaseController {
     }
 
     @PostMapping("/settings")
-    @PreAuthorize("hasAuthority('TENANT_ADMIN')")
+    @PreAuthorize("hasAnyAuthority('TENANT_ADMIN', 'CUSTOMER_USER')")
     public Settings saveSettings(@PathVariable String deviceId, @RequestBody SaveSettings settings) throws ThingsboardException {
         Device device = device(deviceId, Operation.WRITE_ATTRIBUTES);
         return production.saveSettings(device.getTenantId(), device.getId(), settings);

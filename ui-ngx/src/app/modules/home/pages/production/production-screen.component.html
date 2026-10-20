@@ -7,8 +7,10 @@
 <main #page class="production-page production-screen">
   <header>
     <div class="screen-headline">
-      <img class="screen-brand" src="assets/zhigong-logo-white.svg" alt="智工物联">
-      <div class="screen-heading"><h1>{{ 'production.screen-title' | translate }}</h1><span class="device-name" [title]="view?.deviceName || ''">{{ view?.deviceName || ('production.overview' | translate) }}</span></div>
+      <div class="screen-heading">
+        <h1 [title]="view?.customerName || ''">{{ view?.customerName || ((view && view.customerName !== undefined ? 'production.screen-no-customer' : 'production.screen-customer-loading') | translate) }}</h1>
+        <span class="device-name" [title]="view?.deviceName || ''">{{ view?.deviceName || ('production.overview' | translate) }}</span>
+      </div>
     </div>
     <div class="header-actions">
       <div class="screen-clock"><span>{{ date }}</span><time>{{ clock }}</time></div>

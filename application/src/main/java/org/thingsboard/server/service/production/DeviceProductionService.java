@@ -39,6 +39,7 @@ import static org.thingsboard.server.service.production.ProductionModels.*;
 @Profile("!install")
 @Slf4j
 public class DeviceProductionService {
+    public static final int CURRENT_SCHEMA_VERSION = 2;
     private final JdbcTemplate jdbc;
     private final TransactionTemplate write;
     private final TransactionTemplate read;
@@ -57,6 +58,14 @@ public class DeviceProductionService {
     public void initSchema() {
         write.executeWithoutResult(tx -> {
             jdbc.execute("SELECT pg_advisory_xact_lock(7536891047216478432)");
+            boolean versioned = Boolean.TRUE.equals(jdbc.queryForObject(
+                    "SELECT to_regclass('public.production_schema_settings') IS NOT NULL", Boolean.class));
+            if (versioned) {
+                var versions = jdbc.query("SELECT schema_version FROM production_schema_settings WHERE id=1", (rs, n) -> rs.getInt(1));
+                if (!versions.isEmpty() && versions.getFirst() > CURRENT_SCHEMA_VERSION) {
+                    throw new IllegalStateException("Production schema is newer than this application; a compatible version is required");
+                }
+            }
             ScriptUtils.executeSqlScript(DataSourceUtils.getConnection(Objects.requireNonNull(jdbc.getDataSource())),
                     new ClassPathResource("production-schema.sql"));
         });
@@ -163,6 +172,22 @@ public class DeviceProductionService {
             }
             jdbc.update("UPDATE production_device SET revision=revision+1 WHERE device_id=?", device.getId());
         });
+    }
+
+    public long revision(DeviceId device) {
+        return jdbc.queryForObject("SELECT COALESCE((SELECT revision FROM production_device WHERE device_id=?),0)",
+                Long.class, device.getId());
+    }
+
+    /** Reconcile authoritative raw values only if no calculation changed while the source was read. */
+    public boolean reconcile(TenantId tenant, DeviceId device, List<TsKvEntry> entries, long expectedRevision) {
+        if (entries.isEmpty()) return true;
+        return Boolean.TRUE.equals(write.execute(tx -> {
+            ensureDevice(tenant, device);
+            if (revision(device) != expectedRevision) return false;
+            record(tenant, device, entries, true);
+            return true;
+        }));
     }
 
     private Sample mapSample(ResultSet rs, int row) throws SQLException {

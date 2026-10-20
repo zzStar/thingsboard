@@ -86,6 +86,9 @@ public class DefaultTelemetrySubscriptionService extends AbstractSubscriptionSer
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     private org.thingsboard.server.service.production.DeviceProductionService productionService;
 
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private org.thingsboard.server.service.production.ProductionRepairService productionRepairService;
+
     private ExecutorService tsCallBackExecutor;
 
     @Value("${sql.ts.value_no_xss_validation:false}")
@@ -165,7 +168,18 @@ public class DefaultTelemetrySubscriptionService extends AbstractSubscriptionSer
         if (productionService != null && strategy.saveTimeseries() && entityId.getEntityType() == EntityType.DEVICE
                 && tenantId != null && request.getEntries().stream().anyMatch(entry -> "totalCount".equals(entry.getKey()))) {
             resultFuture = Futures.transform(resultFuture, result -> {
-                productionService.record(tenantId, new DeviceId(entityId.getId()), request.getEntries(), request.isOverwriteValue());
+                try {
+                    productionService.record(tenantId, new DeviceId(entityId.getId()), request.getEntries(), request.isOverwriteValue());
+                } catch (RuntimeException e) {
+                    if (productionRepairService != null) {
+                        try {
+                            productionRepairService.enqueue(new DeviceId(entityId.getId()), request.getEntries());
+                        } catch (RuntimeException markerError) {
+                            e.addSuppressed(markerError); // Startup reconciliation covers a marker lost with the connection.
+                        }
+                    }
+                    throw e;
+                }
                 return result;
             }, tsCallBackExecutor);
         }

@@ -43,7 +43,8 @@ public class DeviceProductionServiceTest {
     public static void database() {
         POSTGRES.start();
         jdbc = new JdbcTemplate(new DriverManagerDataSource(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword()));
-        jdbc.execute("CREATE TABLE device(id uuid PRIMARY KEY, tenant_id uuid, name text DEFAULT 'Production test device', label text)");
+        jdbc.execute("CREATE TABLE customer(id uuid PRIMARY KEY, tenant_id uuid, title text)");
+        jdbc.execute("CREATE TABLE device(id uuid PRIMARY KEY, tenant_id uuid, customer_id uuid, name text DEFAULT 'Production test device', label text)");
     }
 
     @AfterClass
@@ -215,6 +216,30 @@ public class DeviceProductionServiceTest {
 
     private void setupServiceAgain() {
         service = new DeviceProductionService(jdbc, new DataSourceTransactionManager(jdbc.getDataSource()), mock(TimeseriesService.class));
+    }
+
+    @Test
+    public void screenUsesCurrentOwningCustomerWithinTheDeviceTenant() throws Exception {
+        TimeseriesService source = mock(TimeseriesService.class);
+        when(source.findAll(any(), any(), anyList())).thenReturn(Futures.immediateFuture(List.of()));
+        var screens = new ProductionScreenService(jdbc, new DataSourceTransactionManager(jdbc.getDataSource()), service, source);
+        ScreenLink link = screens.create(tenant, device, false);
+        assertEquals("", screens.view(device, link.key()).customerName());
+        UUID customer = UUID.randomUUID();
+        jdbc.update("INSERT INTO customer(id, tenant_id, title) VALUES (?, ?, ?)", customer, tenant.getId(), "客户甲");
+        jdbc.update("UPDATE device SET customer_id=? WHERE id=?", customer, device.getId());
+        assertEquals("客户甲", screens.view(device, link.key()).customerName());
+        jdbc.update("UPDATE customer SET title=? WHERE id=?", "客户甲新名称", customer);
+        assertEquals("客户甲新名称", screens.view(device, link.key()).customerName());
+        UUID other = UUID.randomUUID();
+        jdbc.update("INSERT INTO customer(id, tenant_id, title) VALUES (?, ?, ?)", other, tenant.getId(), "客户乙");
+        jdbc.update("UPDATE device SET customer_id=? WHERE id=?", other, device.getId());
+        assertEquals("客户乙", screens.view(device, link.key()).customerName());
+        jdbc.update("UPDATE customer SET tenant_id=? WHERE id=?", UUID.randomUUID(), other);
+        assertEquals("", screens.view(device, link.key()).customerName());
+        jdbc.update("UPDATE device SET customer_id=NULL WHERE id=?", device.getId());
+        assertEquals("", screens.view(device, link.key()).customerName());
+        assertEquals(link, screens.link(tenant, device));
     }
 
     @Test

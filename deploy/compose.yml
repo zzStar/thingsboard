@@ -37,6 +37,8 @@ services:
       JS_EVALUATOR: local
       HTTP_BIND_ADDRESS: 0.0.0.0
       HTTP_BIND_PORT: "8080"
+      SERVER_SHUTDOWN: graceful
+      SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE: 30s
       JAVA_TOOL_OPTIONS: -Xms256m -Xmx1536m -XX:ActiveProcessorCount=2
       TB_LICENSE_INSTANCE_DATA_FILE: /data/instance-license.data
     volumes:
@@ -59,7 +61,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${CADDY_CONFIG_DIR:-./proxy}:/etc/caddy:ro
       - caddy-data:/data
       - caddy-config:/config
     mem_limit: 128m

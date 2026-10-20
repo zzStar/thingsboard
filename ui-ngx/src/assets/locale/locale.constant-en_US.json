@@ -14474,6 +14474,8 @@
         "backfill-interrupted": "Backfill interrupted; you can retry",
         "processed": "Readings processed",
         "screen-title": "Device production screen",
+        "screen-no-customer": "No customer assigned",
+        "screen-customer-loading": "Loading customer name",
         "screen-link": "Screen link",
         "screen-link-hint": "One permanent link per device. No sign-in required. Resetting or disabling invalidates the old link.",
         "screen-create": "Generate screen link",

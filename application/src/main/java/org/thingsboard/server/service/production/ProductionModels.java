@@ -7,12 +7,14 @@ import java.util.List;
 public final class ProductionModels {
     private ProductionModels() {}
 
+    public static final List<Shift> LEGACY_DEFAULT_SHIFTS = List.of(new Shift("白班", "07:00"), new Shift("夜班", "19:00"));
+
     public record Shift(String name, String start) {}
 
     public record Config(String unit, String timezone, int reportIntervalSeconds, List<Shift> shifts) {
         public static Config defaults() {
             return new Config("贴", "Asia/Shanghai", 2,
-                    List.of(new Shift("白班", "07:00"), new Shift("夜班", "19:00")));
+                    List.of(new Shift("白班", "07:30"), new Shift("夜班", "19:30")));
         }
     }
 

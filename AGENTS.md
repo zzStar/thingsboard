@@ -218,3 +218,21 @@
 - 用户要求普通客户用户可以使用与管理员相同的设备产量功能，随后明确询问是否可通过权限配置实现。已去掉前端canConfigure和6个后端管理接口的TENANT_ADMIN身份硬限制，允许CUSTOMER_USER；继续使用现有设备RBAC校验，不自动给客户所有设备权限、不新增绕过权限的设备列表接口。单位/班次保存要求WRITE_ATTRIBUTES，回算发起要求WRITE_TELEMETRY，链接管理要求READ_TELEMETRY+WRITE_ATTRIBUTES，查询/导出要求READ_TELEMETRY，选择设备要求READ。
 - 后续只需给客户用户组配置“组”角色，目标客户设备组，操作包含READ、READ_TELEMETRY、WRITE_ATTRIBUTES、WRITE_TELEMETRY即可完整使用；Customer Administrator角色仍是CUSTOMER_USER身份，本次修改使其不再被身份硬拦截。无权限/只读角色、跨客户/跨租户设备及受限租户管理员权限继续受原RBAC控制。
 - 12项Spring真实接口测试通过，包含普通客户配置组角色后设备选择/单位及三班设置/历史查询/速度/真实异步回算/永久链接生成读取重置停用、只读写入拒绝、其他客户与租户未分配设备隔离、跨租户及受限管理员回归。生产前端构建和定向ESLint通过；浏览器以模拟CUSTOMER_USER验证设置保存、回算、大屏链接入口/生成，最终控制台无错误，截图.dev/production-customer-role-preview.jpg为测试数据。本轮未修改生产服务器权限、未发布或部署。该权限口径取代此前“仅租户管理员可操作”的产量说明。
+
+## 产量回跳修复与默认班次历史迁移（2026-10-24）
+
+- 用户最初要求修复但先不发版；随后确认所有默认班次及历史都改07:30/19:30，再授权提前构建/推送，最终明确“现在发版”“准备好，你就发”。已按后续授权完成生产部署，结果见下节；先前“未发版”是开发验证阶段状态。
+- 先前只读排查“浩信折页机- CP1号机”2026-10-24 07:30–09:00：8165=误计1924+实际6241。08:00:03.939起7条零值，08:00:04.291恢复到上次旧值1924，首个零到恢复352毫秒；08:09:12.320真正归零后约37秒才增长，目标区间最终6241。证据确认数据回跳，不证明由谁操作或PLC内部原因。原始快照及报告在忽略的.dev/production-audit-20261024/。
+- 新规则排除非零→连续零→相同旧值、且零段严格小于一个配置上报周期的回跳（默认2秒、最大10秒）。按时间而非条数判断；原始counter/ts不改，异常段delta/reset归零、gap标记。持续清零及不同新读数仍计算。实时、重复回算、repair、迟到/覆盖统一重算有界上下文，原子修正样本、分钟及汇总；回算未变化的旧计数也能修正旧算法结果。
+- Config.defaults和前端起点兜底改07:30/19:30；ProductionDefaultScheduleMigration在后续应用启动时逐设备迁移，匹配完整旧默认班次列表，保留自定义版本、单位、时区、上报间隔、effective_ts和大屏密钥。先修正历史回跳，再按源事实重建所有班次/生产日汇总；SQL DIV使用精确整数分配。单设备事务失败回滚，重启续处理；production_migration/default-shifts-0730-v1完成后不再覆盖日后用户修改。
+- schema升级3，旧schema2应用会拒绝3；release-policy切换tb44-production-v2，首次升级走maintenance/停止备份，新版启动后不自动回退旧应用。后续schema3同兼容系列保留原更新流程。普通界面班次编辑仍从所选未来生产日、按旧首班起点生效；本次历史迁移是用户明确要求的一次调整。
+- 已将4193条捕获计数复制到独立临时PG验证：旧8165→迁移6241；新采集与重复回算都是6241，恢复1924的delta=0、源记录数不变；更宽采样区间的日/班总量6740保留09:00后的499正常产量。复现脚本和日志.dev/production-audit-20261024/run-replay.py及fix-replay.log，仅使用本地测试库。21项发布流程故障测试、前端定向ESLint、make deploy-check及diff检查通过；后端完整定向回归日志.dev/production-counter-final-tests.log。未构建正式镜像或完整生产前端，未运行make dev迁移现有本地库。
+
+## 生产发布完成（2026-10-24 11:26:59 Asia/Shanghai）
+
+- 用户明确授权“现在发版”“准备好，你就发”，已发布`20261024-105753-production-fix`，digest `sha256:9fede631ffe3ebfa11a6f45c70ebca877ae83056d31f84e3671ea0da1179d06a`。源码为HEAD `4a9950e3cce452d4ea2a014dbdd2b8267195f1ca`加当前未提交修改，镜像revision带`-dirty`；变更补丁及新类副本保存在忽略的`.dev/release-prep-20261024-105753-production-fix/`。未代用户提交Git。
+- 完整linux/amd64 Docker生产构建通过，包含Angular生产前端和application的665个测试源码编译。使用`--builder eim-builder`，国内基础镜像/GitHub归档命中，Maven/Yarn补齐缓存；本轮缓存位于该builder，其他builder不会自动共享。候选镜像空库安装/schema3/HTTP/MQTT smoke通过，推送并预拉取到服务器后再发布。
+- 额外只读导出在线128MB生产库（本地私有dump约22MiB），完整恢复到无外连、无公开端口的临时PG，使用正式候选镜像演练。56793条源计数哈希/数量、所有原大屏密钥和除班次外的配置哈希均不变；两设备历史迁移完成，所有明细/日/班总量一致，目标区间6241，HTTP READY。临时容器、网络及环境秘密文件已清理，dump仅在忽略目录中，未发布到镜像。
+- 正式执行`make deploy VERSION=20261024-105753-production-fix BUILD=0 MODE=maintenance`，03:24:40Z进入维护，03:24:46Z旧应用停止，03:24:50Z备份完成，03:26:27Z公网/DB/MQTT验证通过，03:26:59Z COMMITTED。维护开始到公网验证恢复约107秒，仅替换应用；PG/Caddy服务保留。备份`/opt/zhigong-things/backups/20261024T032446Z-20261020-164211-4a9950e3cc-16013.dump`，归档目录校验通过；完整恢复演练使用的是此前在线快照，勿混称为最终停止备份的完整恢复验证。
+- 线上再核对：schema3、迁移完成、旧默认班次版本数0；CP1设备07:30–09:00产量6241，08:00:04.291原counter1924保留而delta=0，所有设备源增量/日/班次汇总一致；原有免登录大屏链接实际请求成功，客户凤凰盐城印刷、白班07:30夜班19:30正确。大屏密钥整体哈希与发布前相同，应用healthy/restarts0/OOM=false。
+- 发布记录和日志在`.dev/release-prep-20261024-105753-production-fix/`（metadata.json、deploy.log、rehearsal.json、post-deploy-checks.json、RELEASE.md）。该版本已包含默认班次的历史迁移，后续普通页面编辑仍未来生效；schema2旧应用不能直接回退读取schema3，不盲目回滚旧镜像或覆盖数据库。

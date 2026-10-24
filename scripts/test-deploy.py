@@ -40,7 +40,7 @@ if a[:2]==['image','inspect']:
     fmt=a[a.index('--format')+1] if '--format' in a else ''
     image=a[2]
     if not fmt:
-        labels={} if s.get('unknown') else {'com.zhigong.compatibility':'tb44-production-v1','com.zhigong.production-schema':s['production_schema']}
+        labels={} if s.get('unknown') else {'com.zhigong.compatibility':s.get('old_compatibility',s['compatibility']),'com.zhigong.production-schema':s['production_schema']}
         print(json.dumps([{'Config':{'Labels':labels}}]))
     elif 'RepoDigests' in fmt: print(s['old'] if image==s['old'] else s['new'])
     elif 'com.zhigong.schema' in fmt: print(s.get('expected','4004000000'))
@@ -65,7 +65,7 @@ if a and a[0]=='compose':
         if 'thingsboard' in cmd:
             image=os.environ['APP_IMAGE']
             s['running']='old' if image==s['old'] else 'new'
-            if image!=s['old']: s['production_version']=2
+            if image!=s['old']: s['production_version']=s['target_production_version']
             if failure=='start' and image!=s['old']: s['running']='bad'
             if s.get('kill')=='start' and not s.get('killed'):
                 s['killed']=True; save(); os.kill(os.getppid(),signal.SIGKILL); sys.exit(0)
@@ -134,7 +134,9 @@ def create_connection(*args): return Connection()
         (self.base / 'policy.json').write_bytes(policy)
         self.data = {'events': [], 'running': 'old', 'old': OLD, 'new': NEW,
                      'policy_hash': hashlib.sha256(policy).hexdigest(),
-                     'production_schema': json.loads(policy)['production_schema_sha256']}
+                     'production_schema': json.loads(policy)['production_schema_sha256'],
+                     'compatibility': json.loads(policy)['compatibility'],
+                     'target_production_version': json.loads(policy)['production_schema_version']}
         self.write()
         (self.base / '.env').write_text('POSTGRES_PASSWORD=test-only\n')
         (self.base / 'current').write_text(f'VERSION=old\nAPP_IMAGE={OLD}\nSCHEMA=4004000000\n')
@@ -195,9 +197,18 @@ def create_connection(*args): return Connection()
         self.assertFalse(any(' stop ' in e for e in self.read()['events']))
 
     def test_newer_production_schema_is_rejected_before_stop(self):
-        self.data['production_version']=3; self.write()
+        self.data['production_version']=self.data['target_production_version']+1; self.write()
         self.assertNotEqual(0,self.run_worker().returncode)
         self.assertFalse(any(' stop ' in e for e in self.read()['events']))
+
+    def test_schema_two_image_uses_maintenance_and_is_not_restored_after_schema_three_start(self):
+        self.data.update(old_compatibility='tb44-production-v1',production_version=2,failure='start'); self.write()
+        self.assertNotEqual(0,self.run_worker().returncode)
+        self.assertIn('PHASE=MANUAL_RECOVERY',self.state())
+        events=self.read()['events']
+        self.assertLess(next(i for i,e in enumerate(events) if ' stop thingsboard' in e),
+                        next(i for i,e in enumerate(events) if 'pg_dump' in e))
+        self.assertNotEqual('old',self.read()['running'])
 
     def test_changed_application_database_target_is_rejected_before_stop(self):
         self.data['database_drift']=True; self.write()

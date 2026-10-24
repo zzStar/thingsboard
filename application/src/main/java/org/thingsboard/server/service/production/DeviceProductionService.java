@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceUtils;
 import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.springframework.stereotype.Service;
@@ -27,6 +28,7 @@ import java.time.temporal.TemporalAdjusters;
 import java.time.DayOfWeek;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
 import java.util.UUID;
@@ -39,7 +41,7 @@ import static org.thingsboard.server.service.production.ProductionModels.*;
 @Profile("!install")
 @Slf4j
 public class DeviceProductionService {
-    public static final int CURRENT_SCHEMA_VERSION = 2;
+    public static final int CURRENT_SCHEMA_VERSION = 3;
     private final JdbcTemplate jdbc;
     private final TransactionTemplate write;
     private final TransactionTemplate read;
@@ -154,6 +156,7 @@ public class DeviceProductionService {
         write.executeWithoutResult(tx -> {
             ensureDevice(tenant, device);
             List<ConfigVersion> history = versions(device.getId());
+            List<Long> affected = new ArrayList<>(counters.keySet());
             for (var entry : counters.entrySet()) {
                 Sample old = sample(device.getId(), entry.getKey());
                 if (old != null && (!overwrite || old.counter() == entry.getValue())) continue;
@@ -165,18 +168,118 @@ public class DeviceProductionService {
                 persist(device.getId(), current);
                 contribute(device.getId(), current, history, 1);
                 if (next != null) {
+                    affected.add(next.ts());
                     Sample corrected = reading(next.ts(), next.counter(), current, at(history, next.ts()).config().reportIntervalSeconds());
                     persist(device.getId(), corrected);
                     contribute(device.getId(), corrected, history, 1);
                 }
             }
+            // Also inspect retries/backfills of unchanged counters: their old derived deltas
+            // may have been calculated by an older application version.
+            recalculateTransientZeros(device.getId(), history, affected);
             jdbc.update("UPDATE production_device SET revision=revision+1 WHERE device_id=?", device.getId());
         });
+    }
+
+    private void recalculateTransientZeros(UUID device, List<ConfigVersion> history, List<Long> affected) {
+        List<Long> ordered = affected.stream().distinct().sorted().toList();
+        long from = Math.max(0, ordered.getFirst() - MAX_TRANSIENT_ZERO_MS);
+        long until = ordered.getFirst() + MAX_TRANSIENT_ZERO_MS;
+        for (int i = 1; i < ordered.size(); i++) {
+            long nextFrom = Math.max(0, ordered.get(i) - MAX_TRANSIENT_ZERO_MS);
+            if (nextFrom > until) {
+                recalculateTransientZeros(device, history, from, until);
+                from = nextFrom;
+            }
+            until = ordered.get(i) + MAX_TRANSIENT_ZERO_MS;
+        }
+        recalculateTransientZeros(device, history, from, until);
+    }
+
+    private void recalculateTransientZeros(UUID device, List<ConfigVersion> history, long from, long until) {
+        // Context on both sides lets late/overwritten samples revoke or establish a bounce.
+        // The preceding baseline can be days old after an outage and must still be loaded.
+        long contextFrom = Math.max(0, from - MAX_TRANSIENT_ZERO_MS);
+        List<Sample> stored = new ArrayList<>();
+        Sample baseline = neighbor(device, contextFrom, true);
+        if (baseline != null) stored.add(baseline);
+        stored.addAll(jdbc.query("SELECT * FROM production_sample WHERE device_id=? AND ts>=? AND ts<=? ORDER BY ts",
+                this::mapSample, device, contextFrom, until + MAX_TRANSIENT_ZERO_MS));
+        List<Sample> raw = new ArrayList<>(stored.size());
+        Sample previous = null;
+        for (Sample sample : stored) {
+            raw.add(reading(sample.ts(), sample.counter(), previous, at(history, sample.ts()).config().reportIntervalSeconds()));
+            previous = sample;
+        }
+        List<Sample> corrected = suppressTransientZeros(raw, history);
+        for (int i = baseline == null ? 0 : 1; i < stored.size(); i++) {
+            Sample old = stored.get(i), current = corrected.get(i);
+            if (old.ts() < from || old.ts() > until || old.equals(current)) continue;
+            contribute(device, old, history, -1);
+            persist(device, current);
+            contribute(device, current, history, 1);
+        }
     }
 
     public long revision(DeviceId device) {
         return jdbc.queryForObject("SELECT COALESCE((SELECT revision FROM production_device WHERE device_id=?),0)",
                 Long.class, device.getId());
+    }
+
+    /** One-time upgrade of the old default schedule, including all persisted history. */
+    boolean migrateDefaultSchedule(TenantId tenant, DeviceId device) {
+        return Boolean.TRUE.equals(write.execute(tx -> {
+            ensureDevice(tenant, device);
+            List<ConfigVersion> history = versions(device.getId());
+            if (history.stream().noneMatch(version -> LEGACY_DEFAULT_SHIFTS.equals(version.config().shifts()))) return false;
+            // Repair old zero/rebound deltas before regrouping them into the new production days.
+            List<Long> zeros = jdbc.query("SELECT ts FROM production_sample WHERE device_id=? AND counter=0 AND reset ORDER BY ts",
+                    (rs, n) -> rs.getLong(1), device.getId());
+            if (!zeros.isEmpty()) recalculateTransientZeros(device.getId(), history, zeros);
+            for (ConfigVersion version : history) {
+                if (LEGACY_DEFAULT_SHIFTS.equals(version.config().shifts())) {
+                    jdbc.update("UPDATE production_config SET config=jsonb_set(config,'{shifts}',?::jsonb) WHERE device_id=? AND effective_ts=?",
+                            JacksonUtil.toString(Config.defaults().shifts()), device.getId(), version.effectiveTs());
+                }
+            }
+            rebuildSummaries(device.getId(), versions(device.getId()));
+            jdbc.update("UPDATE production_device SET revision=revision+1 WHERE device_id=?", device.getId());
+            return true;
+        }));
+    }
+
+    private void rebuildSummaries(UUID device, List<ConfigVersion> history) {
+        jdbc.update("DELETE FROM production_summary WHERE device_id=?", device);
+        Long first = jdbc.queryForObject("SELECT MIN(ts) FROM production_sample WHERE device_id=?", Long.class, device);
+        if (first == null) return;
+        long last = Objects.requireNonNull(jdbc.queryForObject("SELECT MAX(ts) FROM production_sample WHERE device_id=?", Long.class, device));
+        List<Period> periods = new ArrayList<>(periods(history, first, last + 1, false));
+        periods.addAll(periods(history, first, last + 1, true));
+        var named = new NamedParameterJdbcTemplate(jdbc);
+        for (Period period : periods) {
+            // Each period scans its indexed endpoints plus at most one crossing endpoint.
+            // NUMERIC arithmetic matches allocate() without overflowing bigint multiplication.
+            named.update("""
+                    WITH points AS (
+                        SELECT ts,previous_ts,delta,gap,reset FROM production_sample
+                            WHERE device_id=:device AND ts>:from AND ts<=:until
+                        UNION ALL
+                        SELECT * FROM (SELECT ts,previous_ts,delta,gap,reset FROM production_sample
+                            WHERE device_id=:device AND ts>:until ORDER BY ts LIMIT 1) boundary
+                            WHERE previous_ts<:until
+                    )
+                    INSERT INTO production_summary(device_id,config_ts,production_date,shift_index,start_ts,end_ts,
+                        quantity,observed_ms,estimated_ms,resets)
+                    SELECT :device,:config,CAST(:date AS date),:shift,:from,:until,
+                        COALESCE(SUM(DIV(delta::numeric*(LEAST(ts,:until)-previous_ts),(ts-previous_ts)::numeric)
+                            -DIV(delta::numeric*(GREATEST(previous_ts,:from)-previous_ts),(ts-previous_ts)::numeric)),0)::bigint,
+                        COALESCE(SUM(CASE WHEN gap THEN 0 ELSE LEAST(ts,:until)-GREATEST(previous_ts,:from) END),0)::bigint,
+                        COALESCE(SUM(CASE WHEN gap THEN LEAST(ts,:until)-GREATEST(previous_ts,:from) ELSE 0 END),0)::bigint,
+                        COUNT(*) FILTER (WHERE reset AND ts<=:until)
+                    FROM points WHERE previous_ts IS NOT NULL
+                    """, Map.of("device", device, "config", period.configTs(), "date", period.productionDate(),
+                    "shift", period.shiftIndex(), "from", period.startTs(), "until", period.endTs()));
+        }
     }
 
     /** Reconcile authoritative raw values only if no calculation changed while the source was read. */

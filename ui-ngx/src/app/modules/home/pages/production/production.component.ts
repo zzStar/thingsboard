@@ -277,7 +277,7 @@ export class ProductionComponent implements OnInit, OnDestroy {
   }
 
   changeShiftCount(count: number) {
-    const origin = this.draft.shifts[0]?.start || '07:00';
+    const origin = this.draft.shifts[0]?.start || '07:30';
     const [hour, minute] = origin.split(':').map(Number);
     this.draft.shifts = Array.from({length: count}, (_, i) => {
       const time = (hour * 60 + minute + i * 1440 / count) % 1440;

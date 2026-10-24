@@ -16,6 +16,7 @@ import static org.thingsboard.server.service.production.ProductionModels.*;
 public final class ProductionCalculator {
     public static final long MINUTE = 60_000;
     public static final long MAX_RANGE = 366L * 24 * 60 * MINUTE;
+    public static final long MAX_TRANSIENT_ZERO_MS = 10_000;
     private ProductionCalculator() {}
 
     public static void validate(Config config) {
@@ -117,6 +118,32 @@ public final class ProductionCalculator {
         boolean reset = value < previous.counter();
         return new Sample(ts, value, previous.ts(), reset ? value : value - previous.counter(),
                 reset, ts - previous.ts() > Math.max(10_000, intervalSeconds * 3000L));
+    }
+
+    /**
+     * PLC initialization can briefly report zero before restoring the unchanged counter.
+     * Recognize only an exact return within one reporting interval (at most 10 seconds).
+     * Keep every raw counter/time; invalid intervals have no production/reset contribution
+     * and remain visible as gaps. Elapsed time, rather than the number of messages, matters.
+     */
+    public static List<Sample> suppressTransientZeros(List<Sample> readings, List<ConfigVersion> versions) {
+        List<Sample> result = new ArrayList<>(readings);
+        for (int i = 1; i < readings.size(); i++) {
+            Sample first = readings.get(i), baseline = readings.get(i - 1);
+            if (first.counter() != 0 || baseline.counter() == 0) continue;
+            int after = i + 1;
+            while (after < readings.size() && readings.get(after).counter() == 0) after++;
+            if (after == readings.size()) continue;
+            Sample recovery = readings.get(after);
+            long window = Math.min(MAX_TRANSIENT_ZERO_MS,
+                    at(versions, first.ts()).config().reportIntervalSeconds() * 1000L);
+            if (recovery.counter() != baseline.counter() || recovery.ts() - first.ts() >= window) continue;
+            for (int j = i; j <= after; j++) {
+                Sample raw = readings.get(j);
+                result.set(j, new Sample(raw.ts(), raw.counter(), raw.previousTs(), 0, false, true));
+            }
+        }
+        return result;
     }
 
     // Cumulative integer allocation conserves every unit across adjacent range/shift/minute boundaries.

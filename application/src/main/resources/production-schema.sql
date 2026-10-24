@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS production_schema_settings (
     id integer PRIMARY KEY CHECK (id = 1),
     schema_version integer NOT NULL
 );
-INSERT INTO production_schema_settings(id,schema_version) VALUES (1,2)
+INSERT INTO production_schema_settings(id,schema_version) VALUES (1,3)
     ON CONFLICT (id) DO UPDATE SET schema_version=EXCLUDED.schema_version;
 
 CREATE TABLE IF NOT EXISTS production_device (
@@ -87,4 +87,9 @@ CREATE INDEX IF NOT EXISTS production_repair_pending_idx ON production_repair(st
 CREATE TABLE IF NOT EXISTS production_repair_state (
     id integer PRIMARY KEY CHECK (id = 1),
     heartbeat_ts bigint NOT NULL
+);
+-- One-time data migrations; completed installations do not rewrite later custom schedules.
+CREATE TABLE IF NOT EXISTS production_migration (
+    name varchar(64) PRIMARY KEY,
+    completed_ts bigint NOT NULL
 );

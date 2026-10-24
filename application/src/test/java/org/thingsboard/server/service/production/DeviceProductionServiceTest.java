@@ -56,6 +56,7 @@ public class DeviceProductionServiceTest {
         when(timeseries.findLatest(any(), any(), eq("speed"))).thenReturn(Futures.immediateFuture(Optional.empty()));
         service = new DeviceProductionService(jdbc, new DataSourceTransactionManager(jdbc.getDataSource()), timeseries);
         service.initSchema();
+        jdbc.execute("TRUNCATE production_migration");
         device = new DeviceId(UUID.randomUUID());
         tenant = new TenantId(UUID.randomUUID());
         jdbc.update("INSERT INTO device(id, tenant_id) VALUES (?, ?)", device.getId(), tenant.getId());
@@ -68,6 +69,197 @@ public class DeviceProductionServiceTest {
 
     private long quantity(long from, long until) {
         return service.report(tenant, device, start + from, start + until, "day", null).rows().stream().mapToLong(Row::quantity).sum();
+    }
+
+    private void legacySchedule(DeviceId target) {
+        service.settings(tenant, target);
+        jdbc.update("UPDATE production_config SET config=jsonb_set(config,'{shifts}',?::jsonb) WHERE device_id=?",
+                org.thingsboard.common.util.JacksonUtil.toString(LEGACY_DEFAULT_SHIFTS), target.getId());
+    }
+
+    @Test
+    public void defaultScheduleMigrationRegroupsAllHistoryAndPreservesUnitsAndCustomVersions() {
+        legacySchedule(device);
+        count(-31 * MINUTE, 1000, false);
+        count(-29 * MINUTE, 1010, false);
+        count(-MINUTE, 1020, false);
+        count(MINUTE, 1030, false);
+        count(12 * 60 * MINUTE - MINUTE, 1130, false);
+        count(12 * 60 * MINUTE + MINUTE, 1140, false);
+        jdbc.update("UPDATE production_config SET config=jsonb_set(config,'{unit}','\"张\"') WHERE device_id=?", device.getId());
+        Config future = new Config("张", "Asia/Shanghai", 2,
+                List.of(new Shift("早班", "08:00"), new Shift("中班", "16:00"), new Shift("夜班", "00:00")));
+        long effective = dayStart(LocalDate.now().plusDays(2), Config.defaults());
+        jdbc.update("INSERT INTO production_config(device_id,effective_ts,config) VALUES (?,?,?::jsonb)",
+                device.getId(), effective, org.thingsboard.common.util.JacksonUtil.toString(future));
+        assertTrue(service.migrateDefaultSchedule(tenant, device));
+        assertEquals(Config.defaults().shifts(), service.settings(tenant, device).current().shifts());
+        assertEquals("张", service.settings(tenant, device).current().unit());
+        assertEquals(future, service.settings(tenant, device).versions().getLast().config());
+        assertEquals(25, quantity(-86400000, 0));
+        assertEquals(115, quantity(0, 86400000));
+        var rows = service.report(tenant, device, start, start + 86400000, "shift", null).rows();
+        assertEquals(110, rows.getFirst().quantity());
+        assertEquals(5, rows.getLast().quantity());
+        assertEquals(140L, (long) jdbc.queryForObject("SELECT SUM(quantity) FROM production_minute WHERE device_id=?", Long.class, device.getId()));
+        assertEquals(140L, (long) jdbc.queryForObject("SELECT SUM(quantity) FROM production_summary WHERE device_id=? AND shift_index=-1", Long.class, device.getId()));
+        // Full stored periods and independently allocated partial ranges must agree.
+        assertEquals(quantity(0, 12 * 60 * MINUTE), rows.getFirst().quantity());
+        assertFalse(service.migrateDefaultSchedule(tenant, device));
+    }
+
+    @Test
+    public void migrationFindsAllLegacyDefaultDevicesOnceAndKeepsCustomSchedules() {
+        legacySchedule(device);
+        DeviceId other = new DeviceId(UUID.randomUUID());
+        jdbc.update("INSERT INTO device(id,tenant_id) VALUES (?,?)", other.getId(), tenant.getId());
+        legacySchedule(other);
+        DeviceId customDevice = new DeviceId(UUID.randomUUID());
+        jdbc.update("INSERT INTO device(id,tenant_id) VALUES (?,?)", customDevice.getId(), tenant.getId());
+        service.settings(tenant, customDevice);
+        var custom = new Config("米", "Asia/Shanghai", 5,
+                List.of(new Shift("早班", "08:00"), new Shift("晚班", "20:00")));
+        jdbc.update("UPDATE production_config SET config=?::jsonb WHERE device_id=?",
+                org.thingsboard.common.util.JacksonUtil.toString(custom), customDevice.getId());
+        try (var first = new ProductionDefaultScheduleMigration(jdbc, service)) {
+            assertFalse(first.tick());
+        }
+        try (var restarted = new ProductionDefaultScheduleMigration(jdbc, service)) {
+            assertFalse(restarted.tick());
+            assertTrue(restarted.tick());
+            assertEquals(Config.defaults().shifts(), service.settings(tenant, device).current().shifts());
+            assertEquals(Config.defaults().shifts(), service.settings(tenant, other).current().shifts());
+            assertEquals(custom, service.settings(tenant, customDevice).current());
+            assertEquals(1L, (long) jdbc.queryForObject("SELECT COUNT(*) FROM production_migration WHERE name=?",
+                    Long.class, ProductionDefaultScheduleMigration.NAME));
+            // An intentional user schedule made after this one-time migration is left alone.
+            legacySchedule(device);
+            assertTrue(restarted.tick());
+            assertEquals(LEGACY_DEFAULT_SHIFTS, service.settings(tenant, device).current().shifts());
+        }
+    }
+
+    @Test
+    public void failedHistoricalRebuildRollsBackConfigurationAndSummariesAndCanBeRetried() {
+        legacySchedule(device);
+        count(0, 1000, false);
+        count(2000, 1010, false);
+        jdbc.execute("CREATE FUNCTION reject_production_rebuild() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+                + "RAISE EXCEPTION 'test rebuild failure'; END $$");
+        jdbc.execute("CREATE TRIGGER reject_production_rebuild BEFORE INSERT ON production_summary "
+                + "FOR EACH ROW EXECUTE FUNCTION reject_production_rebuild()");
+        try {
+            assertThrows(org.springframework.dao.DataAccessException.class, () -> service.migrateDefaultSchedule(tenant, device));
+            assertEquals(LEGACY_DEFAULT_SHIFTS, service.settings(tenant, device).current().shifts());
+            assertEquals(10, quantity(0, 2000));
+            assertEquals(10L, (long) jdbc.queryForObject("SELECT SUM(quantity) FROM production_summary WHERE device_id=? AND shift_index=-1", Long.class, device.getId()));
+        } finally {
+            jdbc.execute("DROP TRIGGER reject_production_rebuild ON production_summary");
+            jdbc.execute("DROP FUNCTION reject_production_rebuild()");
+        }
+        assertTrue(service.migrateDefaultSchedule(tenant, device));
+        assertEquals(Config.defaults().shifts(), service.settings(tenant, device).current().shifts());
+        assertEquals(10, quantity(0, 2000));
+    }
+
+    @Test
+    public void historicalRebuildAllocatesLargeCountersExactlyAcrossTheNewShiftBoundary() {
+        legacySchedule(device);
+        long boundary = 12 * 60 * MINUTE;
+        count(boundary - 1, 0, false);
+        count(boundary + 1, Long.MAX_VALUE, false);
+        assertTrue(service.migrateDefaultSchedule(tenant, device));
+        var rows = service.report(tenant, device, start, start + 86400000, "shift", null).rows();
+        assertEquals(Long.MAX_VALUE / 2, rows.getFirst().quantity());
+        assertEquals(Long.MAX_VALUE / 2 + 1, rows.getLast().quantity());
+        assertEquals(Long.MAX_VALUE, quantity(0, 86400000));
+    }
+
+    @Test
+    public void historicalMigrationRepairsLegacyZeroReboundsBeforeRebuildingDailyAndShiftTotals() {
+        legacySchedule(device);
+        count(0, 1924, false);
+        count(1000, 0, false);
+        count(1352, 1924, false);
+        // Reproduce the old persisted calculation for a PLC startup bounce.
+        jdbc.update("UPDATE production_sample SET gap=false,reset=(ts=?),delta=CASE WHEN ts=? THEN 1924 ELSE 0 END WHERE device_id=?",
+                start + 1000, start + 1352, device.getId());
+        jdbc.update("UPDATE production_minute SET quantity=1924,observed_ms=1352,estimated_ms=0,resets=1 WHERE device_id=?", device.getId());
+        jdbc.update("UPDATE production_summary SET quantity=1924,observed_ms=1352,estimated_ms=0,resets=1 WHERE device_id=?", device.getId());
+        assertTrue(service.migrateDefaultSchedule(tenant, device));
+        assertEquals(0, quantity(0, MINUTE));
+        assertEquals(0L, (long) jdbc.queryForObject("SELECT SUM(quantity) FROM production_summary WHERE device_id=? AND shift_index=-1", Long.class, device.getId()));
+        assertEquals(0L, (long) jdbc.queryForObject("SELECT SUM(quantity) FROM production_minute WHERE device_id=?", Long.class, device.getId()));
+        assertEquals(0L, (long) jdbc.queryForObject("SELECT COUNT(*) FROM production_sample WHERE device_id=? AND reset", Long.class, device.getId()));
+    }
+
+    @Test
+    public void transientZeroBurstAfterAnOutageDoesNotAddOldProductionAndSurvivesRestart() {
+        count(-36 * 60 * MINUTE, 1924, false);
+        count(0, 0, false);
+        for (int i = 346; i <= 351; i++) count(i, 0, false);
+        count(352, 1924, false);
+        assertEquals(0, quantity(0, 60000));
+        assertEquals(7L, (long) jdbc.queryForObject("SELECT COUNT(*) FROM production_sample WHERE device_id=? AND counter=0",
+                Long.class, device.getId()));
+        assertEquals(0L, (long) jdbc.queryForObject("SELECT COUNT(*) FROM production_sample WHERE device_id=? AND reset",
+                Long.class, device.getId()));
+        setupServiceAgain();
+        count(352, 1924, false);
+        count(9 * MINUTE, 1924, false);
+        count(9 * MINUTE + 1000, 0, false);
+        count(9 * MINUTE + 37000, 0, false);
+        count(9 * MINUTE + 38000, 1, false);
+        count(59 * MINUTE, 6241, false);
+        assertEquals(6241, quantity(0, 60 * MINUTE));
+        assertEquals(6241L, (long) jdbc.queryForObject("SELECT SUM(quantity) FROM production_minute WHERE device_id=?", Long.class, device.getId()));
+        assertEquals(6241L, (long) jdbc.queryForObject("SELECT SUM(quantity) FROM production_summary WHERE device_id=? AND shift_index=-1", Long.class, device.getId()));
+        assertEquals(1L, (long) jdbc.queryForObject("SELECT COUNT(*) FROM production_sample WHERE device_id=? AND reset", Long.class, device.getId()));
+    }
+
+    @Test
+    public void lateZerosAndOverwrittenDistantBaselinesReconcileAllDependentContributions() {
+        long reconnect = 36 * 60 * MINUTE;
+        count(0, 1924, false);
+        count(reconnect + 352, 1924, false);
+        count(reconnect, 0, false);
+        assertEquals(0, quantity(reconnect, reconnect + MINUTE));
+        count(0, 1900, true);
+        assertEquals(1924, quantity(reconnect, reconnect + MINUTE));
+        count(0, 1924, true);
+        assertEquals(0, quantity(reconnect, reconnect + MINUTE));
+        count(reconnect, 1, true);
+        assertEquals(1923, quantity(reconnect, reconnect + MINUTE));
+        assertEquals(1924, quantity(0, reconnect + MINUTE));
+        count(reconnect, 0, true);
+        assertEquals(0, quantity(reconnect, reconnect + MINUTE));
+        assertEquals(0L, (long) jdbc.queryForObject("SELECT SUM(quantity) FROM production_minute WHERE device_id=?", Long.class, device.getId()));
+        assertEquals(0L, (long) jdbc.queryForObject("SELECT SUM(quantity) FROM production_summary WHERE device_id=? AND shift_index=-1", Long.class, device.getId()));
+        assertEquals(0L, (long) jdbc.queryForObject("SELECT COUNT(*) FROM production_minute WHERE device_id=? AND (observed_ms<0 OR estimated_ms<0 OR resets<0)", Long.class, device.getId()));
+    }
+
+    @Test
+    public void replayOfUnchangedLegacyCountersRepairsStoredTotalsAndDoesNotReintroduceTheBounce() {
+        count(0, 1924, false);
+        count(1000, 0, false);
+        count(1100, 0, false);
+        count(1352, 1924, false);
+        // Recreate the persisted output of the old algorithm without changing any raw counters.
+        jdbc.update("UPDATE production_sample SET gap=false,reset=(ts=?),delta=CASE WHEN ts=? THEN 1924 ELSE 0 END WHERE device_id=?",
+                start + 1000, start + 1352, device.getId());
+        jdbc.update("UPDATE production_minute SET quantity=1924,observed_ms=1352,estimated_ms=0,resets=1 WHERE device_id=?", device.getId());
+        jdbc.update("UPDATE production_summary SET quantity=1924,observed_ms=1352,estimated_ms=0,resets=1 WHERE device_id=?", device.getId());
+        assertEquals(1924, quantity(0, MINUTE));
+        count(1352, 1924, false);
+        assertEquals(0, quantity(0, MINUTE));
+        List<TsKvEntry> replay = List.of(new BasicTsKvEntry(start + 1000, new LongDataEntry("totalCount", 0L)),
+                new BasicTsKvEntry(start + 1352, new LongDataEntry("totalCount", 1924L)));
+        assertTrue(service.reconcile(tenant, device, replay, service.revision(device)));
+        assertEquals(0, quantity(0, MINUTE));
+        assertEquals(0L, (long) jdbc.queryForObject("SELECT SUM(quantity) FROM production_summary WHERE device_id=? AND shift_index=-1", Long.class, device.getId()));
+        assertEquals(1352L, (long) jdbc.queryForObject("SELECT SUM(estimated_ms) FROM production_minute WHERE device_id=?", Long.class, device.getId()));
+        assertEquals(0L, (long) jdbc.queryForObject("SELECT SUM(observed_ms) FROM production_minute WHERE device_id=?", Long.class, device.getId()));
+        assertEquals(0L, (long) jdbc.queryForObject("SELECT SUM(resets) FROM production_minute WHERE device_id=?", Long.class, device.getId()));
     }
 
     @Test

@@ -5,6 +5,7 @@ package org.thingsboard.server.service.production;
 import org.junit.Test;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
@@ -13,6 +14,61 @@ import static org.thingsboard.server.service.production.ProductionCalculator.*;
 import static org.thingsboard.server.service.production.ProductionModels.*;
 
 public class ProductionCalculatorTest {
+    private List<Sample> samples(long[][] counters) {
+        List<Sample> result = new ArrayList<>();
+        Sample previous = null;
+        for (long[] counter : counters) {
+            previous = reading(counter[0], counter[1], previous, 2);
+            result.add(previous);
+        }
+        return result;
+    }
+
+    @Test
+    public void suppressesTheCapturedBurstOfZerosWithoutCountingTheRestored1924() {
+        long reconnect = 1792800003939L;
+        var raw = samples(new long[][]{{1792668459698L, 1924}, {reconnect, 0},
+                {reconnect + 346, 0}, {reconnect + 347, 0}, {reconnect + 348, 0},
+                {reconnect + 349, 0}, {reconnect + 350, 0}, {reconnect + 351, 0},
+                {reconnect + 352, 1924}, {1792800551328L, 1924},
+                {1792800552320L, 0}, {1792800589000L, 0}, {1792800589459L, 1}, {1792803524852L, 6241}});
+        assertEquals(8165, raw.stream().mapToLong(Sample::delta).sum());
+        var corrected = suppressTransientZeros(raw, List.of(new ConfigVersion(0, Config.defaults())));
+        assertEquals(6241, corrected.stream().mapToLong(Sample::delta).sum());
+        assertEquals(1, corrected.stream().filter(Sample::reset).count());
+        for (int i = 1; i <= 8; i++) {
+            assertEquals(raw.get(i).counter(), corrected.get(i).counter());
+            assertEquals(raw.get(i).previousTs(), corrected.get(i).previousTs());
+            assertTrue(corrected.get(i).gap());
+            assertFalse(corrected.get(i).reset());
+            assertEquals(0, corrected.get(i).delta());
+        }
+    }
+
+    @Test
+    public void preservesRealResetsThatGrowToADifferentValueOrPersistForAReportInterval() {
+        for (long[][] counters : List.of(new long[][]{{0, 100}, {1000, 0}, {1500, 7}},
+                new long[][]{{0, 100}, {1000, 0}, {3000, 100}},
+                new long[][]{{0, 100}, {1000, 0}, {1500, 1}, {1900, 100}},
+                new long[][]{{0, 0}, {352, 1924}})) {
+            var raw = samples(counters);
+            assertEquals(raw, suppressTransientZeros(raw, List.of(new ConfigVersion(0, Config.defaults()))));
+        }
+    }
+
+    @Test
+    public void usesTheConfigurationAtTheFirstZeroAndCapsTheWindowAtTenSeconds() {
+        var raw = samples(new long[][]{{0, 100}, {1000, 0}, {2500, 100}});
+        var oneSecond = new Config("贴", "Asia/Shanghai", 1, Config.defaults().shifts());
+        assertEquals(raw, suppressTransientZeros(raw, List.of(new ConfigVersion(0, oneSecond),
+                new ConfigVersion(2000, Config.defaults()))));
+        var slow = new Config("贴", "Asia/Shanghai", 60, Config.defaults().shifts());
+        assertEquals(0, suppressTransientZeros(raw, List.of(new ConfigVersion(0, slow)))
+                .stream().mapToLong(Sample::delta).sum());
+        var longReset = samples(new long[][]{{0, 100}, {1000, 0}, {11000, 100}});
+        assertEquals(longReset, suppressTransientZeros(longReset, List.of(new ConfigVersion(0, slow))));
+    }
+
     @Test
     public void countsMultipleResetsWithoutCountingInitialCounter() {
         Sample previous = null;

@@ -179,12 +179,13 @@ public class ProductionRepairServiceTest {
 
     @Test
     public void futureSchemaRefusesStartupWithoutDowngradingDatabaseMarker() {
-        jdbc.update("UPDATE production_schema_settings SET schema_version=3 WHERE id=1");
+        int current = DeviceProductionService.CURRENT_SCHEMA_VERSION;
+        jdbc.update("UPDATE production_schema_settings SET schema_version=? WHERE id=1", current + 1);
         try {
             assertThrows(IllegalStateException.class, production::initSchema);
-            assertEquals(3, (int) jdbc.queryForObject("SELECT schema_version FROM production_schema_settings", Integer.class));
+            assertEquals(current + 1, (int) jdbc.queryForObject("SELECT schema_version FROM production_schema_settings", Integer.class));
         } finally {
-            jdbc.update("UPDATE production_schema_settings SET schema_version=2 WHERE id=1");
+            jdbc.update("UPDATE production_schema_settings SET schema_version=? WHERE id=1", current);
         }
     }
 

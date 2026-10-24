@@ -1,23 +1,20 @@
 {
   "format": 1,
-  "compatibility": "tb44-production-v1",
-  "production_schema_sha256": "342b00f17dd7cfa1d4b5bf77489196defc3e3268fbcd105993f2892760cf0654",
+  "compatibility": "tb44-production-v2",
+  "production_schema_sha256": "b7a871213186b0d81ac1fc2ecfaa31ec35196809483289507ef2e1dcd048bbb9",
   "readable_compatibility": [
-    "tb44-production-v1"
+    "tb44-production-v2"
   ],
   "readable_production_schemas": [
-    "342b00f17dd7cfa1d4b5bf77489196defc3e3268fbcd105993f2892760cf0654",
-    "958f63936c8c72fd1bfdf89150c2ab8b8d63b450136d99113a0c89c72d4445c0",
-    "c9a75b04647d89b2deff1fae7147bd73ed0f50cdb8f140e9d587eca475d94f77"
+    "b7a871213186b0d81ac1fc2ecfaa31ec35196809483289507ef2e1dcd048bbb9"
   ],
-  "compatible_legacy_digests": [
-    "sha256:4386f4089bacc24960e358cf8b74f3345ae8e40d01318eba13476ebe1be45d4b"
-  ],
-  "description": "Reviewed additive production tables and repair checkpoints; old readers ignore added tables. Unknown legacy images use maintenance and cannot auto-rollback after new writes.",
-  "production_schema_version": 2,
+  "compatible_legacy_digests": [],
+  "description": "Production schema 3 and the one-time historical 07:30/19:30 migration. Schema 2 readers reject version 3; their first upgrade requires maintenance without automatic rollback after startup. Later schema 3 releases may roll back within this compatibility family.",
+  "production_schema_version": 3,
   "readable_production_versions": [
     0,
     1,
-    2
+    2,
+    3
   ]
 }

@@ -121,29 +121,51 @@ public final class ProductionCalculator {
     }
 
     /**
-     * PLC initialization can briefly report zero before restoring the unchanged counter.
-     * Recognize only an exact return within one reporting interval (at most 10 seconds).
+     * PLC resets can expose descending intermediate values before reaching zero (at most 10 seconds).
+     * Initialization can also briefly report zero before restoring the unchanged counter;
+     * recognize that return only within one reporting interval (at most 10 seconds).
      * Keep every raw counter/time; invalid intervals have no production/reset contribution
      * and remain visible as gaps. Elapsed time, rather than the number of messages, matters.
      */
     public static List<Sample> suppressTransientZeros(List<Sample> readings, List<ConfigVersion> versions) {
         List<Sample> result = new ArrayList<>(readings);
+        // Find the next zero reachable without any intervening increase, in linear time.
+        int[] zeroEnds = new int[readings.size()];
+        int nextZero = -1;
+        for (int i = readings.size() - 1; i >= 0; i--) {
+            if (readings.get(i).counter() == 0) nextZero = i;
+            else if (i + 1 == readings.size() || readings.get(i).counter() < readings.get(i + 1).counter()) nextZero = -1;
+            zeroEnds[i] = nextZero;
+        }
         for (int i = 1; i < readings.size(); i++) {
             Sample first = readings.get(i), baseline = readings.get(i - 1);
-            if (first.counter() != 0 || baseline.counter() == 0) continue;
-            int after = i + 1;
+            if (baseline.counter() == 0 || first.counter() >= baseline.counter()) continue;
+            int zero = zeroEnds[i];
+            if (zero < 0 || readings.get(zero).ts() - first.ts() >= MAX_TRANSIENT_ZERO_MS) continue;
+            if (zero > i) {
+                for (int j = i; j < zero; j++) result.set(j, invalidResetReading(readings.get(j)));
+                Sample settled = readings.get(zero);
+                // The intermediate values are invalid, but reaching zero still confirms one genuine reset.
+                result.set(zero, new Sample(settled.ts(), 0, settled.previousTs(), 0, true, true));
+            }
+            int after = zero + 1;
             while (after < readings.size() && readings.get(after).counter() == 0) after++;
-            if (after == readings.size()) continue;
-            Sample recovery = readings.get(after);
             long window = Math.min(MAX_TRANSIENT_ZERO_MS,
-                    at(versions, first.ts()).config().reportIntervalSeconds() * 1000L);
-            if (recovery.counter() != baseline.counter() || recovery.ts() - first.ts() >= window) continue;
-            for (int j = i; j <= after; j++) {
-                Sample raw = readings.get(j);
-                result.set(j, new Sample(raw.ts(), raw.counter(), raw.previousTs(), 0, false, true));
+                    at(versions, readings.get(zero).ts()).config().reportIntervalSeconds() * 1000L);
+            if (after < readings.size() && readings.get(after).counter() == baseline.counter()
+                    && readings.get(after).ts() - readings.get(zero).ts() < window) {
+                for (int j = i; j <= after; j++) result.set(j, invalidResetReading(readings.get(j)));
+                i = after;
+            } else {
+                // Do not reuse an invalid intermediate as the baseline for the zero/rebound rule.
+                i = zero;
             }
         }
         return result;
+    }
+
+    private static Sample invalidResetReading(Sample raw) {
+        return new Sample(raw.ts(), raw.counter(), raw.previousTs(), 0, false, true);
     }
 
     // Cumulative integer allocation conserves every unit across adjacent range/shift/minute boundaries.

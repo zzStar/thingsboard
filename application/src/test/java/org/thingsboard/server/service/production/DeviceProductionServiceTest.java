@@ -20,6 +20,7 @@ import org.thingsboard.server.common.data.kv.TsKvEntry;
 import org.thingsboard.server.dao.timeseries.TimeseriesService;
 
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -75,6 +76,39 @@ public class DeviceProductionServiceTest {
         service.settings(tenant, target);
         jdbc.update("UPDATE production_config SET config=jsonb_set(config,'{shifts}',?::jsonb) WHERE device_id=?",
                 org.thingsboard.common.util.JacksonUtil.toString(LEGACY_DEFAULT_SHIFTS), target.getId());
+    }
+
+    private void configVersion(long effective, Config config) {
+        jdbc.update("INSERT INTO production_config(device_id,effective_ts,config) VALUES (?,?,?::jsonb)",
+                device.getId(), effective, org.thingsboard.common.util.JacksonUtil.toString(config));
+    }
+
+    private void assertFullDefaultShifts(long day) {
+        var rows = service.report(tenant, device, day, day + 86400000, "shift", null).rows();
+        assertEquals(2, rows.size());
+        assertEquals("白班", rows.getFirst().shiftName());
+        assertEquals(day, rows.getFirst().startTs());
+        assertEquals(day + 12 * 60 * MINUTE, rows.getFirst().endTs());
+        assertEquals("夜班", rows.getLast().shiftName());
+        assertEquals(day + 12 * 60 * MINUTE, rows.getLast().startTs());
+        assertEquals(day + 86400000, rows.getLast().endTs());
+    }
+
+    @Test
+    public void defaultMigrationRemovesTheOldSevenOClockBoundaryWhenVersionsBecomeIdentical() {
+        legacySchedule(device);
+        long tomorrow = dayStart(LocalDate.now(ZoneId.of("Asia/Shanghai")).plusDays(1), Config.defaults());
+        configVersion(tomorrow - 30 * MINUTE, Config.defaults());
+        count(0, 1000, false);
+        count(2000, 1010, false);
+        assertEquals(3, service.report(tenant, device, tomorrow - 86400000, tomorrow, "shift", null).rows().size());
+
+        assertTrue(service.migrateDefaultSchedule(tenant, device));
+
+        assertEquals(1, service.settings(tenant, device).versions().size());
+        assertFullDefaultShifts(tomorrow - 86400000);
+        assertEquals(10, quantity(0, 86400000));
+        assertEquals(10L, (long) jdbc.queryForObject("SELECT SUM(quantity) FROM production_summary WHERE device_id=? AND shift_index=-1", Long.class, device.getId()));
     }
 
     @Test
@@ -193,6 +227,90 @@ public class DeviceProductionServiceTest {
         assertEquals(0L, (long) jdbc.queryForObject("SELECT COUNT(*) FROM production_sample WHERE device_id=? AND reset", Long.class, device.getId()));
     }
 
+    private List<TsKvEntry> infraredEntries() {
+        long[][] values = {{0, 14}, {2000, 606}, {5696, 512}, {9385, 0}, {13080, 1}, {16767, 8}};
+        return java.util.Arrays.stream(values).map(value -> (TsKvEntry) new BasicTsKvEntry(
+                start + value[0], new LongDataEntry("totalCount", value[1]))).toList();
+    }
+
+    @Test
+    public void arrivingZeroRemovesTheInfraredIntermediateAndKeepsOneResetAndEightNewUnits() {
+        var entries = infraredEntries();
+        service.record(tenant, device, entries.subList(0, 3), false);
+        assertEquals(1104, quantity(0, 60000));
+
+        service.record(tenant, device, entries.subList(3, 4), false);
+        assertEquals(592, quantity(0, 60000));
+        service.record(tenant, device, entries.subList(4, 6), false);
+
+        assertEquals(600, quantity(0, 60000));
+        assertEquals(512L, (long) jdbc.queryForObject("SELECT counter FROM production_sample WHERE device_id=? AND ts=?", Long.class, device.getId(), start + 5696));
+        assertEquals(0L, (long) jdbc.queryForObject("SELECT delta FROM production_sample WHERE device_id=? AND ts=?", Long.class, device.getId(), start + 5696));
+        assertEquals(1L, (long) jdbc.queryForObject("SELECT COUNT(*) FROM production_sample WHERE device_id=? AND reset", Long.class, device.getId()));
+        assertEquals(7385L, (long) jdbc.queryForObject("SELECT SUM(estimated_ms) FROM production_minute WHERE device_id=?", Long.class, device.getId()));
+        assertEquals(600L, (long) jdbc.queryForObject("SELECT SUM(quantity) FROM production_summary WHERE device_id=? AND shift_index=-1", Long.class, device.getId()));
+        assertEquals(600L, (long) jdbc.queryForObject("SELECT SUM(quantity) FROM production_summary WHERE device_id=? AND shift_index>=0", Long.class, device.getId()));
+        setupServiceAgain();
+        service.record(tenant, device, entries, false);
+        assertEquals(600, quantity(0, 60000));
+    }
+
+    @Test
+    public void lateZeroAndExplicitOverwriteCanConfirmAndRevokeIntermediateSuppression() {
+        var entries = infraredEntries();
+        service.record(tenant, device, entries.subList(0, 3), false);
+        count(9385, 520, false);
+        assertEquals(1112, quantity(0, 60000));
+
+        count(9385, 0, true);
+        assertEquals(592, quantity(0, 60000));
+        count(9385, 520, true);
+        assertEquals(1112, quantity(0, 60000));
+        assertEquals(0L, (long) jdbc.queryForObject("SELECT SUM(estimated_ms) FROM production_minute WHERE device_id=?", Long.class, device.getId()));
+        count(9385, 0, true);
+        service.record(tenant, device, entries.subList(4, 6), false);
+        assertEquals(600, quantity(0, 60000));
+    }
+
+    @Test
+    public void outOfOrderZeroRepairsTheAlreadyStoredSuccessorAndAllAggregates() {
+        var entries = infraredEntries();
+        service.record(tenant, device, entries.subList(0, 3), false);
+        service.record(tenant, device, entries.subList(4, 6), false);
+        assertEquals(1112, quantity(0, 60000));
+
+        service.record(tenant, device, entries.subList(3, 4), false);
+
+        assertEquals(600, quantity(0, 60000));
+        assertEquals(1L, (long) jdbc.queryForObject("SELECT COUNT(*) FROM production_sample WHERE device_id=? AND reset", Long.class, device.getId()));
+        assertEquals(600L, (long) jdbc.queryForObject("SELECT SUM(delta) FROM production_sample WHERE device_id=?", Long.class, device.getId()));
+    }
+
+    @Test
+    public void unchangedHistoricalReplayAndRepairRemoveTheLegacy512WithoutChangingSourceCounters() {
+        var entries = infraredEntries();
+        service.record(tenant, device, entries, false);
+        String original = jdbc.queryForObject("SELECT md5(string_agg(ts||':'||counter||':'||COALESCE(previous_ts,-1),',' ORDER BY ts)) FROM production_sample WHERE device_id=?", String.class, device.getId());
+        // Recreate the old algorithm's coherent source facts, minute totals and two summary totals.
+        jdbc.update("UPDATE production_sample SET delta=CASE WHEN ts=? THEN 512 ELSE 0 END,reset=true,gap=false WHERE device_id=? AND ts IN (?,?)",
+                start + 5696, device.getId(), start + 5696, start + 9385);
+        jdbc.update("UPDATE production_minute SET quantity=quantity+512,observed_ms=observed_ms+7385,estimated_ms=estimated_ms-7385,resets=resets+1 WHERE device_id=? AND minute_ts=?",
+                device.getId(), start);
+        jdbc.update("UPDATE production_summary SET quantity=quantity+512,observed_ms=observed_ms+7385,estimated_ms=estimated_ms-7385,resets=resets+1 WHERE device_id=?", device.getId());
+        assertEquals(1112, quantity(0, 60000));
+
+        assertTrue(service.reconcile(tenant, device, entries.subList(3, 4), service.revision(device)));
+        assertEquals(600, quantity(0, 60000));
+        service.record(tenant, device, entries, false);
+
+        assertEquals(600, quantity(0, 60000));
+        assertEquals(original, jdbc.queryForObject("SELECT md5(string_agg(ts||':'||counter||':'||COALESCE(previous_ts,-1),',' ORDER BY ts)) FROM production_sample WHERE device_id=?", String.class, device.getId()));
+        assertEquals(600L, (long) jdbc.queryForObject("SELECT SUM(quantity) FROM production_minute WHERE device_id=?", Long.class, device.getId()));
+        assertEquals(600L, (long) jdbc.queryForObject("SELECT SUM(quantity) FROM production_summary WHERE device_id=? AND shift_index=-1", Long.class, device.getId()));
+        assertEquals(600L, (long) jdbc.queryForObject("SELECT SUM(quantity) FROM production_summary WHERE device_id=? AND shift_index>=0", Long.class, device.getId()));
+        assertEquals(1L, (long) jdbc.queryForObject("SELECT SUM(resets) FROM production_minute WHERE device_id=?", Long.class, device.getId()));
+    }
+
     @Test
     public void transientZeroBurstAfterAnOutageDoesNotAddOldProductionAndSurvivesRestart() {
         count(-36 * 60 * MINUTE, 1924, false);
@@ -307,6 +425,132 @@ public class DeviceProductionServiceTest {
                 new Config("米", "Asia/Shanghai", 2, Config.defaults().shifts()), LocalDate.now().minusDays(1).toString())));
         assertEquals("页", service.settings(tenant, device).current().unit());
         assertEquals(effective, service.settings(tenant, device).versions().getLast().effectiveTs());
+    }
+
+    @Test
+    public void repeatedUnchangedSavesDoNotCreateConfigurationVersions() {
+        service.settings(tenant, device);
+        long revision = service.revision(device);
+        for (int i = 1; i <= 3; i++) {
+            Settings saved = service.saveSettings(tenant, device,
+                    new SaveSettings(Config.defaults(), LocalDate.now().plusDays(i).toString()));
+            assertEquals(1, saved.versions().size());
+        }
+        assertEquals(revision, service.revision(device));
+        assertFullDefaultShifts(start);
+    }
+
+    @Test
+    public void movingAndCancellingAPendingScheduleKeepsOnlyMeaningfulVersions() {
+        count(0, 1000, false);
+        count(2000, 1010, false);
+        var threeShifts = new Config("张", "Asia/Shanghai", 2,
+                List.of(new Shift("早班", "08:00"), new Shift("中班", "16:00"), new Shift("夜班", "00:00")));
+        LocalDate date = LocalDate.now(ZoneId.of("Asia/Shanghai")).plusDays(2);
+        service.saveSettings(tenant, device, new SaveSettings(threeShifts, date.toString()));
+        long revision = service.revision(device);
+        Settings repeated = service.saveSettings(tenant, device, new SaveSettings(threeShifts, date.toString()));
+        assertEquals(2, repeated.versions().size());
+        assertEquals(revision, service.revision(device));
+        Settings moved = service.saveSettings(tenant, device, new SaveSettings(threeShifts, date.plusDays(1).toString()));
+        assertEquals(2, moved.versions().size());
+        assertEquals(dayStart(date.plusDays(1), Config.defaults()), moved.versions().getLast().effectiveTs());
+
+        Settings cancelled = service.saveSettings(tenant, device, new SaveSettings(
+                new Config("张", "Asia/Shanghai", 2, Config.defaults().shifts()), date.plusDays(1).toString()));
+
+        assertEquals(1, cancelled.versions().size());
+        assertEquals("张", cancelled.current().unit());
+        assertTrue(service.revision(device) > revision);
+        assertFullDefaultShifts(dayStart(date, Config.defaults()));
+        assertEquals(10, quantity(0, 86400000));
+    }
+
+    @Test
+    public void savingAnExistingRedundantPendingVersionRestoresTheFullNightShift() {
+        count(0, 1000, false);
+        count(2000, 1010, false);
+        long tomorrow = dayStart(LocalDate.now(ZoneId.of("Asia/Shanghai")).plusDays(1), Config.defaults());
+        configVersion(tomorrow - 30 * MINUTE, Config.defaults());
+        assertEquals(3, service.report(tenant, device, tomorrow - 86400000, tomorrow, "shift", null).rows().size());
+        long revision = service.revision(device);
+
+        Settings saved = service.saveSettings(tenant, device, new SaveSettings(
+                new Config("张", "Asia/Shanghai", 2, Config.defaults().shifts()), null));
+
+        assertEquals(1, saved.versions().size());
+        assertEquals("张", saved.current().unit());
+        assertTrue(service.revision(device) > revision);
+        assertFullDefaultShifts(tomorrow - 86400000);
+        assertEquals(10, quantity(0, 86400000));
+    }
+
+    @Test
+    public void removingHistoricalDuplicateVersionsRebuildsSummaryKeysAndPreservesAllCounters() {
+        service.settings(tenant, device);
+        long split = 24 * 60 * MINUTE - 30 * MINUTE;
+        configVersion(start + split, Config.defaults());
+        count(0, 1000, false);
+        count(split - 1000, 1010, false);
+        count(split + 1000, 1013, false);
+        count(86400000 - 1000, 1020, false);
+        assertEquals(3, service.report(tenant, device, start, start + 86400000, "shift", null).rows().size());
+        String counters = jdbc.queryForObject("SELECT md5(string_agg(ts||':'||counter||':'||delta,',' ORDER BY ts)) FROM production_sample WHERE device_id=?", String.class, device.getId());
+
+        Settings saved = service.saveSettings(tenant, device, new SaveSettings(Config.defaults(), null));
+
+        assertEquals(1, saved.versions().size());
+        assertFullDefaultShifts(start);
+        assertEquals(20, quantity(0, 86400000));
+        assertEquals(counters, jdbc.queryForObject("SELECT md5(string_agg(ts||':'||counter||':'||delta,',' ORDER BY ts)) FROM production_sample WHERE device_id=?", String.class, device.getId()));
+        assertEquals(0L, (long) jdbc.queryForObject("SELECT COUNT(*) FROM production_summary WHERE device_id=? AND config_ts<>0", Long.class, device.getId()));
+        assertEquals(20L, (long) jdbc.queryForObject("SELECT SUM(quantity) FROM production_summary WHERE device_id=? AND shift_index=-1", Long.class, device.getId()));
+        assertEquals(20L, (long) jdbc.queryForObject("SELECT SUM(quantity) FROM production_summary WHERE device_id=? AND shift_index>=0", Long.class, device.getId()));
+        // Later input still uses the retained configuration key, including updates to an existing sample.
+        count(split + 1000, 1015, true);
+        assertEquals(20, quantity(0, 86400000));
+    }
+
+    @Test
+    public void cleanupPreservesChangesToTimezoneReportingIntervalAndReturnsToAnEarlierSchedule() {
+        service.settings(tenant, device);
+        var interval = new Config("贴", "Asia/Shanghai", 5, Config.defaults().shifts());
+        var timezone = new Config("贴", "UTC", 5, Config.defaults().shifts());
+        configVersion(start, interval);
+        configVersion(start + 86400000, timezone);
+        configVersion(start + 2 * 86400000, Config.defaults());
+
+        Settings saved = service.saveSettings(tenant, device, new SaveSettings(
+                new Config("张", "Asia/Shanghai", 2, Config.defaults().shifts()), null));
+
+        assertEquals(4, saved.versions().size());
+        assertEquals(5, saved.versions().get(1).config().reportIntervalSeconds());
+        assertEquals("UTC", saved.versions().get(2).config().timezone());
+        assertTrue(saved.versions().stream().allMatch(version -> "张".equals(version.config().unit())));
+    }
+
+    @Test
+    public void failedDuplicateCleanupRollsBackUnitVersionRemovalAndSummariesTogether() {
+        service.settings(tenant, device);
+        configVersion(start + 1000, Config.defaults());
+        count(0, 1000, false);
+        count(2000, 1010, false);
+        long revision = service.revision(device);
+        jdbc.execute("CREATE FUNCTION reject_duplicate_cleanup() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN "
+                + "RAISE EXCEPTION 'test duplicate cleanup failure'; END $$");
+        jdbc.execute("CREATE TRIGGER reject_duplicate_cleanup BEFORE INSERT ON production_summary "
+                + "FOR EACH ROW EXECUTE FUNCTION reject_duplicate_cleanup()");
+        try {
+            assertThrows(org.springframework.dao.DataAccessException.class, () -> service.saveSettings(tenant, device,
+                    new SaveSettings(new Config("张", "Asia/Shanghai", 2, Config.defaults().shifts()), null)));
+            assertEquals(2, service.settings(tenant, device).versions().size());
+            assertEquals("贴", service.settings(tenant, device).current().unit());
+            assertEquals(revision, service.revision(device));
+            assertEquals(10, quantity(0, 2000));
+        } finally {
+            jdbc.execute("DROP TRIGGER reject_duplicate_cleanup ON production_summary");
+            jdbc.execute("DROP FUNCTION reject_duplicate_cleanup()");
+        }
     }
 
     @Test

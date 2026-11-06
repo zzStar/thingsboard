@@ -111,14 +111,26 @@ public class DeviceProductionService {
                 if (effectiveTs <= now) throw new IllegalArgumentException("班次配置须从未来生产日生效，历史统计保持原班次配置");
                 if (effectiveTs > now + MAX_RANGE) throw new IllegalArgumentException("配置生效日期须在未来一年内");
                 Long last = jdbc.queryForObject("SELECT MAX(ts) FROM production_sample WHERE device_id=?", Long.class, device.getId());
-                if (last != null && last >= effectiveTs) throw new IllegalArgumentException("该日期已有产量记录，请选择更晚的生产日");
+                long firstChangedTs = pending == null ? effectiveTs : Math.min(effectiveTs, pending.effectiveTs());
+                if (last != null && last >= firstChangedTs) throw new IllegalArgumentException("该日期已有产量记录，请选择更晚的生产日");
                 jdbc.update("DELETE FROM production_config WHERE device_id=? AND effective_ts>?", device.getId(), now);
-                jdbc.update("INSERT INTO production_config(device_id, effective_ts, config) VALUES (?, ?, ?::jsonb)",
-                        device.getId(), effectiveTs, JacksonUtil.toString(request.config()));
+                // Restoring the active schedule cancels the pending change; it must not create a no-op boundary.
+                if (!sameSchedule(request.config(), current)) {
+                    jdbc.update("INSERT INTO production_config(device_id, effective_ts, config) VALUES (?, ?, ?::jsonb)",
+                            device.getId(), effectiveTs, JacksonUtil.toString(request.config()));
+                }
             }
-            // A device's unit is a display label, so rename it immediately without rebuilding any aggregates.
+            // Unit labels apply immediately; unit changes alone do not create configuration boundaries.
             jdbc.update("UPDATE production_config SET config=jsonb_set(config, '{unit}', to_jsonb(CAST(? AS text))) WHERE device_id=?",
                     request.config().unit(), device.getId());
+            boolean removed = removeRedundantConfigVersions(device.getId());
+            if (removed || scheduleChanged && pending != null) {
+                // Summaries are keyed by configuration version. Rebuild them in the same transaction as boundary removal.
+                rebuildSummaries(device.getId(), versions(device.getId()));
+            }
+            if (removed || scheduleChanged) {
+                jdbc.update("UPDATE production_device SET revision=revision+1 WHERE device_id=?", device.getId());
+            }
         });
         return settings(tenant, device);
     }
@@ -138,6 +150,21 @@ public class DeviceProductionService {
     private static boolean sameSchedule(Config first, Config second) {
         return first.timezone().equals(second.timezone()) && first.reportIntervalSeconds() == second.reportIntervalSeconds()
                 && first.shifts().equals(second.shifts());
+    }
+
+    // Call while holding the device row lock, and rebuild summaries before committing any removed keys.
+    private boolean removeRedundantConfigVersions(UUID device) {
+        Config previous = null;
+        boolean removed = false;
+        for (ConfigVersion version : versions(device)) {
+            if (previous != null && sameSchedule(previous, version.config())) {
+                jdbc.update("DELETE FROM production_config WHERE device_id=? AND effective_ts=?", device, version.effectiveTs());
+                removed = true;
+            } else {
+                previous = version.config();
+            }
+        }
+        return removed;
     }
 
     public void record(TenantId tenant, DeviceId device, List<TsKvEntry> entries, boolean overwrite) {
@@ -242,6 +269,7 @@ public class DeviceProductionService {
                             JacksonUtil.toString(Config.defaults().shifts()), device.getId(), version.effectiveTs());
                 }
             }
+            removeRedundantConfigVersions(device.getId());
             rebuildSummaries(device.getId(), versions(device.getId()));
             jdbc.update("UPDATE production_device SET revision=revision+1 WHERE device_id=?", device.getId());
             return true;

@@ -70,6 +70,69 @@ public class ProductionCalculatorTest {
     }
 
     @Test
+    public void excludesTheConfirmedInfraredResetIntermediate512AndPreservesNewProduction() {
+        var raw = samples(new long[][]{{1793430959058L, 14}, {1793431690576L, 606},
+                {1793431694272L, 512}, {1793431697961L, 0}, {1793431701656L, 1}, {1793431705343L, 8}});
+        assertEquals(1112, raw.stream().mapToLong(Sample::delta).sum());
+
+        var corrected = suppressTransientZeros(raw, List.of(new ConfigVersion(0, Config.defaults())));
+
+        assertEquals(600, corrected.stream().mapToLong(Sample::delta).sum());
+        assertEquals(512, corrected.get(2).counter());
+        assertEquals(raw.get(2).previousTs(), corrected.get(2).previousTs());
+        assertEquals(0, corrected.get(2).delta());
+        assertFalse(corrected.get(2).reset());
+        assertTrue(corrected.get(2).gap());
+        assertTrue(corrected.get(3).reset());
+        assertTrue(corrected.get(3).gap());
+        assertEquals(1, corrected.stream().filter(Sample::reset).count());
+        assertEquals(1, corrected.get(4).delta());
+        assertEquals(7, corrected.get(5).delta());
+    }
+
+    @Test
+    public void confirmsMultipleDescendingAndRepeatedIntermediateValuesOnlyAfterZeroArrives() {
+        var raw = samples(new long[][]{{0, 1000}, {1000, 768}, {2000, 768}, {4000, 512},
+                {6000, 256}, {9999, 0}, {12000, 3}});
+        var history = List.of(new ConfigVersion(0, Config.defaults()));
+        var unfinished = raw.subList(0, 5);
+        assertEquals(unfinished, suppressTransientZeros(unfinished, history));
+
+        var corrected = suppressTransientZeros(raw, history);
+
+        assertEquals(3, corrected.stream().mapToLong(Sample::delta).sum());
+        assertEquals(1, corrected.stream().filter(Sample::reset).count());
+        for (int i = 1; i <= 4; i++) {
+            assertEquals(raw.get(i).counter(), corrected.get(i).counter());
+            assertEquals(0, corrected.get(i).delta());
+            assertFalse(corrected.get(i).reset());
+        }
+    }
+
+    @Test
+    public void preservesDeclinesWithoutZeroWithInterveningGrowthOrOutsideTheConfirmationWindow() {
+        for (long[][] counters : List.of(new long[][]{{0, 606}, {1000, 512}, {5000, 512}},
+                new long[][]{{0, 606}, {1000, 512}, {11000, 0}, {13000, 8}},
+                new long[][]{{0, 606}, {1000, 512}, {4000, 513}, {5000, 0}, {7000, 8}},
+                new long[][]{{0, 0}, {1000, 512}, {2000, 0}, {3000, 8}})) {
+            var raw = samples(counters);
+            assertEquals(raw, suppressTransientZeros(raw, List.of(new ConfigVersion(0, Config.defaults()))));
+        }
+    }
+
+    @Test
+    public void restoresTheOriginalBaselineWhenResetIntermediatesPrecedeAZeroRebound() {
+        var raw = samples(new long[][]{{0, 606}, {1000, 512}, {4000, 0}, {4352, 606}, {8000, 610}});
+        var corrected = suppressTransientZeros(raw, List.of(new ConfigVersion(0, Config.defaults())));
+        assertEquals(4, corrected.stream().mapToLong(Sample::delta).sum());
+        assertEquals(0, corrected.stream().filter(Sample::reset).count());
+        // A real new count of 512 must not be mistaken for a recovery of the invalid intermediate.
+        var different = samples(new long[][]{{0, 606}, {1000, 512}, {4000, 0}, {4352, 512}});
+        assertEquals(512, suppressTransientZeros(different, List.of(new ConfigVersion(0, Config.defaults())))
+                .stream().mapToLong(Sample::delta).sum());
+    }
+
+    @Test
     public void countsMultipleResetsWithoutCountingInitialCounter() {
         Sample previous = null;
         long quantity = 0;

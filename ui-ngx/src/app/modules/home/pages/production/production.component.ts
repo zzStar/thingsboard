@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
 // SPDX-License-Identifier: Apache-2.0
-import { Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { AppState } from '@core/core.state';
@@ -27,7 +27,6 @@ import { ProductionDatetimeAdapter } from './production-datetime-adapter';
   providers: [{provide: DatetimeAdapter, useClass: ProductionDatetimeAdapter}], standalone: false
 })
 export class ProductionComponent implements OnInit, OnDestroy {
-  @ViewChild('page', {static: true}) page: ElementRef<HTMLElement>;
   readonly deviceType = EntityType.DEVICE;
   readonly canConfigure = [Authority.TENANT_ADMIN, Authority.CUSTOMER_USER].includes(getCurrentAuthUser(this.store).authority);
   deviceId: string;
@@ -380,11 +379,6 @@ export class ProductionComponent implements OnInit, OnDestroy {
     if (!value) { return ''; }
     const date = moment(value);
     return date.isValid() ? date.format(format) : '';
-  }
-
-  async fullscreen() {
-    if (document.fullscreenElement) { await document.exitFullscreen(); }
-    else { await this.page.nativeElement.requestFullscreen(); }
   }
 
   private fail(error: any) {

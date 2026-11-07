@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
 // SPDX-License-Identifier: Apache-2.0
+import { ProductionWallboardComponent } from './lib/production/production-wallboard.component';
 import { NgModule } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { SharedModule } from '@app/shared/shared.module';
@@ -141,6 +142,7 @@ import { ApiUsageWidgetComponent } from "@home/components/widget/lib/cards/api-u
     MapTimelinePanelComponent,
     MapWidgetComponent,
     HtmlContainerWidgetComponent,
+    ProductionWallboardComponent,
     ApiUsageWidgetComponent
   ],
   imports: [
@@ -206,6 +208,7 @@ import { ApiUsageWidgetComponent } from "@home/components/widget/lib/cards/api-u
     ScadaSymbolWidgetComponent,
     MapWidgetComponent,
     HtmlContainerWidgetComponent,
+    ProductionWallboardComponent,
     ApiUsageWidgetComponent
   ],
   providers: [

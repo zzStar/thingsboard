@@ -1,0 +1,11 @@
+{
+  "widgetsBundle": {
+    "alias": "production",
+    "title": "生产看板",
+    "description": "设备产量大屏",
+    "order": 2100
+  },
+  "widgetTypeFqns": [
+    "production_wallboard"
+  ]
+}

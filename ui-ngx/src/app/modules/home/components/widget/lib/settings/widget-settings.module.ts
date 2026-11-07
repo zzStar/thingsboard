@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
 // SPDX-FileCopyrightText: Modifications Copyright ThingsBoard, Inc.
 // SPDX-License-Identifier: Apache-2.0 AND BUSL-1.1
+import { ProductionWallboardSettingsComponent } from '../production/production-wallboard-settings.component';
 import { NgModule } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { SharedModule } from '@shared/shared.module';
@@ -383,6 +384,7 @@ import {
 
 @NgModule({
   declarations: [
+    ProductionWallboardSettingsComponent,
     QrCodeWidgetSettingsComponent,
     MobileAppQrCodeWidgetSettingsComponent,
     TimeseriesTableWidgetSettingsComponent,
@@ -528,6 +530,7 @@ import {
     WidgetSettingsCommonModule
   ],
   exports: [
+    ProductionWallboardSettingsComponent,
     QrCodeWidgetSettingsComponent,
     MobileAppQrCodeWidgetSettingsComponent,
     TimeseriesTableWidgetSettingsComponent,

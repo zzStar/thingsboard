@@ -1,0 +1,26 @@
+<!-- SPDX-FileCopyrightText: Copyright The ThingsBoard Authors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<div class="screens-page">
+  <header><div><h1>{{ 'production.screens-title' | translate }}</h1><p>{{ 'production.screens-description' | translate }}</p></div>
+    <div class="actions"><a mat-stroked-button routerLink="/production"><mat-icon>bar_chart</mat-icon>{{ 'production.title' | translate }}</a>
+      @if (canCreate) { <button mat-flat-button color="primary" (click)="showCreate = true" [disabled]="creating || showCreate"><mat-icon>add</mat-icon>{{ 'production.new-screen' | translate }}</button> }</div>
+  </header>
+  @if (showCreate && canCreate) {
+    <form class="create-form" (ngSubmit)="create()">
+      <mat-form-field appearance="outline" subscriptSizing="dynamic"><mat-label>{{ 'production.screen-name' | translate }}</mat-label><input matInput name="newName" [(ngModel)]="newName" maxlength="100" required [disabled]="creating"></mat-form-field>
+      <button mat-flat-button color="primary" type="submit" [disabled]="creating || !newName.trim()">{{ 'production.new-screen' | translate }}</button>
+      <button mat-button type="button" (click)="showCreate = false" [disabled]="creating">{{ 'action.cancel' | translate }}</button>
+    </form>
+  }
+  <form class="filters" (ngSubmit)="load(true)"><mat-form-field appearance="outline" subscriptSizing="dynamic"><mat-label>{{ 'production.search-screens' | translate }}</mat-label><input matInput name="search" [(ngModel)]="search" maxlength="255"><button mat-icon-button matSuffix type="submit" [attr.aria-label]="'production.search-screens' | translate"><mat-icon>search</mat-icon></button></mat-form-field>
+    <button mat-stroked-button type="button" (click)="load()" [disabled]="loading"><mat-icon>refresh</mat-icon>{{ 'production.refresh' | translate }}</button></form>
+  @if (loading) { <mat-progress-bar mode="indeterminate"></mat-progress-bar> }
+  @if (failed) { <p class="error" role="alert">{{ 'production.screens-error' | translate }}</p> }
+  <div class="table-wrap"><table><thead><tr><th>{{ 'production.screen-name' | translate }}</th><th>{{ 'production.screen-created-time' | translate }}</th><th>{{ 'production.screen-actions' | translate }}</th></tr></thead><tbody>
+    @for (entry of result?.data || []; track entry.id) {
+      <tr><td><a [routerLink]="['/dashboard', entry.id]">{{ entry.title }}</a></td><td>{{ entry.createdTime | date:'yyyy-MM-dd HH:mm' }}</td><td class="row-actions"><a mat-stroked-button [routerLink]="['/dashboard', entry.id]"><mat-icon>open_in_new</mat-icon>{{ 'production.open-screen' | translate }}</a>
+        @if (entry.canEdit) { <button mat-button (click)="edit(entry)"><mat-icon>edit</mat-icon>{{ 'production.edit-screen' | translate }}</button> }</td></tr>
+    } @empty { @if (!loading && !failed) { <tr><td colspan="3" class="empty">{{ 'production.screens-empty' | translate }}</td></tr> } }
+  </tbody></table></div>
+  <mat-paginator [length]="result?.totalElements || 0" [pageSize]="pageSize" [pageIndex]="page" [pageSizeOptions]="[10,20,50]" (page)="page = $event.pageIndex; pageSize = $event.pageSize; load()" showFirstLastButtons></mat-paginator>
+</div>

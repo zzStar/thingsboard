@@ -173,6 +173,10 @@ export class WidgetContext {
     return this.dashboard.dashboardTimewindow;
   }
 
+  get widgetId(): string {
+    return this.widget.id;
+  }
+
   get widgetConfig(): WidgetConfig {
     return this.widget.config;
   }

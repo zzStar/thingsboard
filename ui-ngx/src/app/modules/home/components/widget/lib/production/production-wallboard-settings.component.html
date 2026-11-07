@@ -1,0 +1,32 @@
+<!-- SPDX-FileCopyrightText: Copyright The ThingsBoard Authors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+@if (form) {
+  <section [formGroup]="form" class="flex flex-col gap-4">
+    <mat-form-field appearance="outline"><mat-label>大屏标题</mat-label><input matInput formControlName="title" maxlength="100"></mat-form-field>
+    <mat-form-field appearance="outline"><mat-label>设备范围</mat-label><mat-select formControlName="mode"><mat-option value="ALL_VISIBLE">当前访问者有权读取的全部设备</mat-option><mat-option value="DEVICE_GROUPS">指定设备组</mat-option><mat-option value="EXPLICIT_DEVICES">指定设备</mat-option></mat-select></mat-form-field>
+    @if (form.get('mode').value === 'DEVICE_GROUPS') {
+      <div formArrayName="groupIds">
+        @for (control of groups.controls; track control; let index = $index) {
+          <div class="flex items-center gap-2"><tb-entity-group-autocomplete class="flex-1" [formControlName]="index" [groupType]="deviceType" placeholderText="设备组" notFoundText="未找到设备组" appearance="outline"></tb-entity-group-autocomplete><button mat-icon-button (click)="removeGroup(index)" aria-label="移除设备组"><mat-icon>close</mat-icon></button></div>
+        }
+      </div>
+      <button mat-stroked-button (click)="addGroup()" [disabled]="groups.length >= 20">添加设备组</button>
+    }
+    @if (form.get('mode').value === 'EXPLICIT_DEVICES') {
+      <tb-entity-list-select formControlName="deviceSelection" [allowedEntityTypes]="[deviceType]" [predefinedEntityType]="deviceType" appearance="outline"></tb-entity-list-select>
+    }
+    <p>范围会与当前访问者的系统权限取交集。公开链接请使用原生看板与设备组的公开设置；公开看板本身不会公开设备。</p>
+    <mat-form-field appearance="outline"><mat-label>设备分类服务端属性</mat-label><input matInput formControlName="typeAttribute"><mat-hint>例如 productionType；在设备服务端属性中设置“折页机”“印刷机”等。空值归入未分类。</mat-hint></mat-form-field>
+    <mat-form-field appearance="outline"><mat-label>类型顺序（每行一个，可留空）</mat-label><textarea matInput formControlName="typeOrderText" rows="3"></textarea></mat-form-field>
+    <div formGroupName="display" class="grid grid-cols-2 gap-4">
+      <mat-form-field appearance="outline"><mat-label>主题</mat-label><mat-select formControlName="theme"><mat-option value="dark">深色</mat-option><mat-option value="light">浅色</mat-option><mat-option value="auto">跟随系统</mat-option></mat-select></mat-form-field>
+      <mat-form-field appearance="outline"><mat-label>每屏类型数（1–3）</mat-label><input matInput type="number" formControlName="typesPerFrame" min="1" max="3" step="1"></mat-form-field>
+      <mat-form-field appearance="outline"><mat-label>每卡设备数（1–7）</mat-label><input matInput type="number" formControlName="devicesPerCard" min="1" max="7" step="1"></mat-form-field>
+      <mat-form-field appearance="outline"><mat-label>详情行数（6–16，含汇总）</mat-label><input matInput type="number" formControlName="detailRowBudget" min="6" max="16" step="1"></mat-form-field>
+      <mat-form-field appearance="outline"><mat-label>整页轮播间隔（秒）</mat-label><input matInput type="number" formControlName="rotationSeconds" min="10" max="300" step="1"></mat-form-field>
+      <mat-form-field appearance="outline"><mat-label>数据刷新间隔（秒）</mat-label><input matInput type="number" formControlName="refreshSeconds" min="5" max="60" step="1"></mat-form-field>
+    </div>
+    @if (form.errors) { <p role="alert">请检查设备范围、类型顺序及整数容量设置。最多300台设备，20个设备组。</p> }
+    <p>单位复用每台设备的产量设置。不同单位或时区自动分组。月均速度按已过自然时间计算，不使用 speed 遥测平均值。</p>
+  </section>
+}

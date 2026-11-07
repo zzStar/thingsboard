@@ -1,5 +1,7 @@
 // SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
 // SPDX-License-Identifier: Apache-2.0
+import { PageData } from '@shared/models/page/page-data';
+import { ProductionScreenEntry } from '@shared/models/production-wallboard.models';
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { defaultHttpOptions } from './http-utils';
@@ -11,6 +13,11 @@ import {
 @Injectable({providedIn: 'root'})
 export class ProductionService {
   constructor(private http: HttpClient) {}
+
+  boards(pageSize: number, page: number, textSearch: string) {
+    return this.http.get<PageData<ProductionScreenEntry>>('/api/production/boards',
+      defaultHttpOptions(true, true, false, {pageSize, page, textSearch}));
+  }
 
   screenLink(device: string) {
     return this.http.get<ProductionScreenLink | null>(`/api/production/${device}/screen-link`, defaultHttpOptions(true, true));

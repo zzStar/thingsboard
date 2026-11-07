@@ -270,3 +270,66 @@
 
 - 用户要求去掉设备产量界面的“数据不完整”。已在共用ProductionBoard（含匿名大屏）的今日/班次及历史列表隐藏INCOMPLETE文字与警告样式，今日日期不残留分隔符；产量数值、计算、接口状态和Excel/CSV导出数据状态保留，其他状态照常显示。
 - 两个修改模板的定向ESLint、Angular应用类型/模板检查（ngc --noEmit）及diff检查通过。未部署服务器，沿用此前暂不发版要求。
+
+
+## 多类型设备产量大屏（2026-11-06）
+
+- 用户授权本地实现，明确不部署。集合链接采用原生公开看板及原生权限管理，不增加发布白名单、独立密钥或权限表；旧单机密钥链接不变。
+- 新增 ProductionBoardConfigParser/AccessService/QueryService/Service、只读 POST /api/production/boards/{dashboardId}/snapshot。先检查原生 Dashboard READ，再通过 EntityQueryService 使用当前 SecurityUser 查询范围，过滤 readAttrs/readTs，授权后分组、汇总、分页；公开客户也走该接口。
+- 配置存于 Dashboard Widget settings；设备分类使用服务端属性 productionType。按类型、单位、时区分组，多组设备去重。月均速度按已过自然统计时长（包含停机、离线），类型均速为产量之和／对应设备小时之和，无采集与真实零值区分。
+- 新增编译型 production_wallboard 系统 Widget 和原生设置面板，“监控 → 设备产量”提供创建入口，打开原生 edit 参数以便配置。固定1920×1080画布等比适配，默认每屏3类／每卡7台／详情16行，20秒整页轮播，手选暂停，5秒刷新；权限失效清屏、断线保留产量隐藏速度。
+- production schema 仍为3，无新表或迁移。ProductionBoardWidgetInstaller 在正常启动用事务 advisory lock 仅补齐缺失 Widget/bundle，不调用全量系统组件重载，不覆盖已有组件编辑；新安装 JSON 与启动资源一致。
+- JDK25 下82项新旧 PostgreSQL/Spring/计算测试、Angular生产构建、定向ESLint通过；Chrome用生产前端和本地模拟API验证三分辨率×双主题×三层视图及五个整页共23个布局状态、轮播、断线恢复和403清屏。模拟数据截图 .dev/production-wallboard-preview.png、production-wallboard-type-preview.png；真实客户负载待验收。需求及使用说明已更新 docs/PRODUCTION-WALLBOARD-DESIGN.md 和 docs/PRODUCTION.md。未提交、构建发布镜像、推送或部署。
+
+
+## 本地集合大屏预览数据（2026-11-06）
+
+- 用户明确授权创建独立演示设备并写入模拟产量，保留现有设备，不部署。通过用户当前原生登录会话调用本地 API 创建12台演示设备：7台折页机（贴）、3台印刷机（张）、2台装订机（本）；name使用“本地演示-”前缀，服务端属性 productionType、localProductionDemo、dataSource 标记分类和模拟来源，使用既有单位设置接口。
+- 演示设备集中在私有设备组“产量大屏演示设备（仅本地模拟）”，独立 Dashboard 位于“本地产量演示看板”组。大屏名“设备产量大屏 · 本地模拟数据”，地址 http://localhost:4200/dashboard/863bcf00-d9c4-11f1-9a89-bbdef52689a1。未公开实体组、未修改角色或权限，原有设备与看板未覆盖。
+- 历史数据经原生遥测写入接口和原产量计算链路处理，已验证6日趋势、12台范围、3类对应单位、折页详情14班次行+2汇总行。模拟上报脚本 .dev/run-wallboard-demo.py 经本地设备 HTTP API 每5秒更新一次，启动后2小时自动停止；进程号见 .dev/wallboard-demo-feeder.pid，停止进程后演示设备和看板仍保留。设备访问令牌仅存于忽略的0600私有文件，不输出、不提交；临时管理员会话文件已删除。
+- 清单 .dev/production-wallboard-local-preview.json、验证 .dev/production-wallboard-local-verification.json、实际运行截图 .dev/production-wallboard-local-live.png。浏览器已用真实本地后端确认分类、合计与产量持续增长。修正单页时的轮播提示为“当前仅1页”，开发模板编译和定向HTML ESLint通过。仅本地操作，未部署。
+
+
+## 集合大屏左侧设备菜单（2026-11-06，未部署）
+
+- 用户确认左侧菜单可以有滚动条。顶部两个下拉框已替换为240px的按类型分组菜单；只有左侧列表独立纵滚，右侧和整页仍无滚动。类型名称查看汇总，箭头展开／收起，每次只展开一个类型，设备进入单机；选中项高亮，原整页轮播保留。
+- 菜单从原授权快照types/deviceChoices生成，不新增权限、接口或表。视图请求期间保留菜单，按类型／设备ID追踪DOM以保持轮询滚动位置，权限及范围失效时菜单与内容一起清空。收起不改变主视图，手选视图暂停轮播。
+- Angular类型／模板、定向ESLint、生产构建通过。生产前端+本地模拟API验证三分辨率×双主题×三层视图18状态，右侧与整页溢出0；十类型菜单独立滚动、末尾设备选择、键盘展开、刷新保持位置、403清空及恢复通过。修正16行表格的行高／网格约束，避免约2px撑高。真实本地演示看板沿用原记录已更新，截图.dev/production-wallboard-sidebar-live.png。后端和数据权限逻辑未改，未部署。
+
+
+## 产量入口统一（2026-11-06，仅本地）
+
+- 用户明确要求统一为“设备产量”和“产量大屏”，旧单机链接继续可用，不部署。监控菜单新增MenuId.production_screens及/production-screens列表；设备产量/production保留概览、历史、导出、单位与班次设置，顶部只链接到产量大屏，不再直接创建大屏或提供管理页全屏入口。
+- 产量大屏页面集中搜索、打开、命名新建、原生编辑。新建先填写1–100字名称，再调用原生Dashboard保存，打开列表或取消不创建记录。已有Dashboard及Widget配置继续使用，未新建大屏权限或注册表。
+- GET /api/production/boards新增目录投影：原生EntityService.findUserEntities按当前SecurityUser合并Dashboard READ权限分页取得候选；只对已授权ID并限定tenant_id批量读取配置，按system.production_wallboard识别，过滤后分页／计数；单批100，最多扫描10000条可访问仪表板，可按名称搜索缩小范围。canEdit复用原生AccessControl WRITE；组权限编辑走原生对应组路由，不假设所有客户都有全局WRITE。
+- 旧production-screen路由、密钥、匿名接口与管理API未修改。设备设置中仅对已有链接且具备原权限显示“已有单机链接（兼容）”折叠区，保留复制、打开、重置、停用；常规界面不再生成旧链接。重启前后本地现存1条密钥摘要一致，并验证原匿名接口仍200且无需登录。
+- JDK25下ProductionBoardControllerTest 8项（含新增目录筛选／分页及客户共享READ／组WRITE／跨租户）、DeviceProductionControllerTest 12项共20项通过。ngc、定向ESLint、生产构建、双语JSON无重复键、diff检查通过。实际本地浏览器验证两个菜单、列表搜索、原生编辑、新建／取消、设备设置折叠兼容区。验证用临时大屏已清理，原有4个产量大屏保留。证据.dev/production-screen-entries-*及production-entry-local-verification.json，截图.dev/production-entry-unified-screens.png。make dev已重启并保持运行；未推送或部署。
+
+- 2026-11-07 多设备产量大屏增加右上深浅模式按钮；浅色为白蓝卡片／蓝色标题栏／黄色点缀，深色提升对比度，统一卡片层次和无数据状态。按Dashboard+Widget在浏览器localStorage保存外观，不写Dashboard或改变原生权限；auto默认监听系统偏好，退出移除监听。视口留白同步变色，左菜单滚动和右侧整页轮播不变。类型／模板、定向ESLint、生产构建通过；本地真实API在三横屏尺寸×两主题×三视图18状态无溢出，刷新偏好保留、控制台无错误。截图.dev/production-wallboard-theme-light-live.png、dark-live.png，记录.dev/production-wallboard-theme-layout-checks.json。演示采集昨日已结束，今日暂无数据为真实状态；未部署。
+
+- 2026-11-07 按用户图片将大屏文字主题按钮改为太阳／月亮胶囊双段开关，选中圆形底高亮；点击太阳固定浅色、月亮固定深色，保留按看板组件记忆。Angular类型／模板及定向ESLint通过，本地浏览器验证点击、Enter键切换、唯一选中、刷新记忆及右侧无溢出。截图.dev/production-day-night-switch.png；未部署。
+
+- 2026-11-07 左侧设备菜单细节美化：标题图标、总览线性图标、统一类型设备图标与数量徽标，设备树细连接线、缩进和紧凑行距，选中背景／左侧色条／节点高亮，悬停反馈及旋转展开箭头，兼容减少动画偏好。菜单宽度、单类型展开、类型名称切换、原生权限成员和独立纵向滚动机制不变。Angular类型／模板、HTML ESLint及开发热构建通过；本地浏览器三横屏尺寸×两主题无横向溢出、右侧及整页无溢出，键盘展开收起保持设备选择，控制台无错误。截图.dev/production-menu-polish-light.png、production-menu-polish-selected.png、production-menu-polish-dark.png；未部署。
+
+
+## 三种产量大屏重新设计（2026-11-07，仅本地）
+
+- 用户确认按总览／分类／单设备分别重排，深浅协调、左菜单可滚、右侧一屏、复用原有权限，不部署。仅重构ProductionWallboardComponent三文件及文档；Dashboard／Widget配置、原生授权快照、统计接口、分组单位／时区、schema与旧单机链接未改。
+- 总览为紧凑指标卡+各类月度趋势+当前页设备产量，移除英文装饰、嵌套大底色和空轨道；分类保留完整16行班次／汇总与右侧对比／趋势；单设备为五指标+两／三班卡+速度／月度产量双图，历史班次超过三个使用完整紧凑表，不裁行。范围说明随当前视图变化，单页隐藏无效翻页／轮播控制，保留太阳月亮主题与浏览器记忆。
+- 空图居中提示，真实0仍画零线，未知日期断开曲线，单速度采样显示点；快照到达同步时钟，避免秒级时钟尚未推进造成实时速度短暂未知。
+- 独立ngc／ESLint、最终生产Angular构建通过。真实本地18状态+十类型五页30状态+三班／16历史班次12状态，共60状态无右侧／整页溢出；最终单页控制简化后又核对6视图主题状态。模拟接口验证0／未知／混合缺失／单点、末尾设备、断线保留产量隐藏速度、403清空与恢复；未把测试数据写入设备或Dashboard。记录.dev/wallboard-redesign-{real-layout,overflow-layout,shift-layout,data-states,final-ui}.json，截图.dev/wallboard-redesign-{ALL,TYPE,DEVICE}-{light,dark}.png。
+- 本地服务此前已停止，确认无开发Java／Node及8080／4200监听后清理空锁，重新make dev（执行会话47382，日志.dev/local-dev-start.log）；PG18原库跳过初始化，构建启动成功、前端代理setup API 200。真实本地原演示Dashboard沿用，测试服务18129及其标签页／故障标志已清理，4200／8080仅本地监听保持运行；未提交Git、推送或部署。
+
+
+## 今日演示产量与速度（2026-11-07，仅本地数据）
+
+- 用户要求补齐今天模拟产量和速度以查看三个视图，不部署。通过当前浏览器原生登录会话，先只读核对12台既有独立演示设备的名称、localProductionDemo、productionType、单位／时区和最新totalCount；仅使用原演示设备令牌经本地127.0.0.1:8080原生设备HTTP telemetry API写入totalCount与speed。未新建设备／大屏、未改权限、统计配置、产品源码或原有真实设备，未触碰生产服务器。临时会话文件验证后已删除。
+- 从2026-11-07 07:30到约09:33按30秒间隔补2964个采样（247×12），模拟速度波动与短暂停机；以前次累计数作今日基线，停报过夜区间不补产量，不写未来数据。尚未开始的夜班今日值保留未知。日期限定、已完成计划与运行PID检查防止误执行／重复补量，计划.dev/wallboard-demo-seed-2026-11-07.json不含令牌。
+- .dev/run-wallboard-demo.py 已重启，每5秒上报一次，自动停止于上海时间2026-11-07 11:33:11；私密令牌文件仍0600且不输出，PID文件.dev/wallboard-demo-feeder.pid，日志.dev/wallboard-demo-feeder.log。结束仅停模拟上报，设备、历史采样和大屏保留。
+- 原授权快照验证三类型12台均有今日产量，分类完整16行，单机60个分钟聚合速度点同时有0和运行值，实时速度时间新鲜，6秒间隔今日产量由3664增至3667。三视图×双主题实际数据下无面板／右侧溢出，速度和条形图显示正常。证据.dev/wallboard-demo-today-verification.json、production-demo-today-ui.json；截图.dev/production-demo-today-{ALL,TYPE,DEVICE}-{light,dark}.png，完整画布截图.dev/production-demo-today-ALL.png及DEVICE.png。
+
+
+## 本地提交与后续发版边界（2026-11-07）
+
+- 用户要求将当前多类型产量大屏功能、入口统一、三视图／双主题设计及文档提交到本地Git，发版等待之后再次明确通知。本轮不推送远端、不构建发布镜像、不部署服务器。
+- 提交范围核对为35个代码／资源／测试／文档文件；开发模拟采样、设备令牌、临时会话、日志、截图与构建产物均不纳入提交。已有82项新旧后端回归及后续20项入口／接口回归、最终生产前端构建、类型／模板和ESLint记录已核对；本轮补查diff、源码文件头、双语键无重复、Widget安装资源一致性及凭据模式，无须重复运行已通过且源码未变的检查。

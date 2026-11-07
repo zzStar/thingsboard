@@ -4,16 +4,16 @@
     SPDX-License-Identifier: Apache-2.0
 
 -->
-<div #page class="production-page">
+<div class="production-page">
   <header>
     <div><h1>{{ 'production.title' | translate }}</h1><span>{{ deviceName }}</span></div>
     <div class="header-actions">
+      <a mat-stroked-button routerLink="/production-screens"><mat-icon>dashboard</mat-icon>{{ 'production.screens-title' | translate }}</a>
       <tb-entity-autocomplete [entityType]="deviceType" [ngModel]="selectedDevice" (ngModelChange)="selectDevice($event)"
                               useFullEntityId [labelText]="'production.device'" appearance="outline"></tb-entity-autocomplete>
       @if (canConfigure && overview) {
         <button mat-stroked-button (click)="setTab('settings')"><mat-icon>edit</mat-icon>{{ 'production.configure-unit' | translate }}: {{ overview.config.unit }}</button>
       }
-      <button mat-stroked-button (click)="fullscreen()" [disabled]="!overview"><mat-icon>fullscreen</mat-icon>{{ 'production.fullscreen' | translate }}</button>
     </div>
   </header>
   @if (error) { <div class="message error" role="alert">{{ error }}</div> }
@@ -28,20 +28,6 @@
     <button mat-icon-button [disabled]="loading" (click)="refresh()" [matTooltip]="'production.refresh' | translate"><mat-icon>refresh</mat-icon></button>
   </nav>
   <section [hidden]="tab !== 'overview' || !overview">
-    @if (canShareLink && overview) {
-      <div class="screen-link-panel">
-        <div><h2>{{ 'production.screen-link' | translate }}</h2><p class="hint">{{ 'production.screen-link-hint' | translate }}</p></div>
-        @if (screenLink) {
-          <mat-form-field appearance="outline"><mat-label>{{ 'production.screen-link' | translate }}</mat-label><input matInput readonly [value]="screenUrl"></mat-form-field>
-          <button mat-flat-button color="primary" ngxClipboard [cbContent]="screenUrl" (cbOnSuccess)="copyScreenLink()" [disabled]="linkBusy"><mat-icon>content_copy</mat-icon>{{ 'production.screen-copy' | translate }}</button>
-          <a mat-stroked-button [href]="screenUrl" target="_blank" rel="noopener noreferrer"><mat-icon>open_in_new</mat-icon>{{ 'production.screen-open' | translate }}</a>
-          <button mat-button (click)="resetScreenLink()" [disabled]="linkBusy">{{ 'production.screen-reset' | translate }}</button>
-          <button mat-button (click)="revokeScreenLink()" [disabled]="linkBusy">{{ 'production.screen-revoke' | translate }}</button>
-        } @else {
-          <button mat-flat-button color="primary" (click)="createScreenLink()" [disabled]="linkBusy"><mat-icon>link</mat-icon>{{ 'production.screen-create' | translate }}</button>
-        }
-      </div>
-    }
     <tb-production-board [overview]="overview" [speed]="chartSpeedData" [output]="chartOutputData"></tb-production-board>
   </section>
   <section [hidden]="tab !== 'history' || !overview" class="report-panel">
@@ -88,6 +74,19 @@
       <p class="hint">{{ 'production.day-start-hint' | translate }}: {{ draft.shifts[0].start }} · {{ draft.unit }}/{{ 'production.hour' | translate }}</p>
       <button mat-flat-button color="primary" (click)="saveSettings()" [disabled]="saving || !draft.unit || (scheduleChanged && !effectiveDate)">{{ 'production.save' | translate }}</button>
       <button mat-button (click)="resetDraft()">{{ 'production.reset-form' | translate }}</button>
+      @if (canShareLink && screenLink) {
+        <mat-expansion-panel>
+          <mat-expansion-panel-header><mat-panel-title>{{ 'production.existing-link-compat' | translate }}</mat-panel-title></mat-expansion-panel-header>
+          <p class="hint">{{ 'production.existing-link-hint' | translate }}</p>
+          <div class="screen-link-panel">
+            <mat-form-field appearance="outline"><mat-label>{{ 'production.screen-link' | translate }}</mat-label><input matInput readonly [value]="screenUrl"></mat-form-field>
+            <button mat-flat-button color="primary" ngxClipboard [cbContent]="screenUrl" (cbOnSuccess)="copyScreenLink()" [disabled]="linkBusy"><mat-icon>content_copy</mat-icon>{{ 'production.screen-copy' | translate }}</button>
+            <a mat-stroked-button [href]="screenUrl" target="_blank" rel="noopener noreferrer"><mat-icon>open_in_new</mat-icon>{{ 'production.screen-open' | translate }}</a>
+            <button mat-button (click)="resetScreenLink()" [disabled]="linkBusy">{{ 'production.screen-reset' | translate }}</button>
+            <button mat-button (click)="revokeScreenLink()" [disabled]="linkBusy">{{ 'production.screen-revoke' | translate }}</button>
+          </div>
+        </mat-expansion-panel>
+      }
       <h2 class="history-title">{{ 'production.config-history' | translate }}</h2>
       <div class="table-wrap"><table><thead><tr><th>{{ 'production.effective-date' | translate }}</th><th>{{ 'production.unit' | translate }}</th><th>{{ 'production.shift' | translate }}</th></tr></thead><tbody>@for (version of settings?.versions || []; track version.effectiveTs) { <tr><td>{{ version.effectiveTs === 0 ? ('production.default-config' | translate) : displayTime(version.effectiveTs) }}</td><td>{{ version.config.unit }}</td><td>@for (item of version.config.shifts; track $index) { <span>{{ item.name }} {{ item.start }}&nbsp;&nbsp;</span> }</td></tr> }</tbody></table></div>
     }

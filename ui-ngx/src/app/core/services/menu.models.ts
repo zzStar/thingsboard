@@ -110,6 +110,7 @@ export enum MenuId {
   alarm_rules = 'alarm_rules',
   dashboards = 'dashboards',
   production = 'production',
+  production_screens = 'production_screens',
   entities = 'entities',
   devices = 'devices',
   assets = 'assets',
@@ -716,6 +717,17 @@ export const menuSectionMap = new Map<MenuId, MenuSection>([
       path: '/production',
       icon: 'bar_chart',
       outlinedIcon: 'bar_chart'
+    }
+  ],
+  [
+    MenuId.production_screens,
+    {
+      id: MenuId.production_screens,
+      name: 'production.screens-title',
+      type: 'link',
+      path: '/production-screens',
+      icon: 'tv',
+      outlinedIcon: 'tv'
     }
   ],
   [
@@ -1577,6 +1589,10 @@ const menuFilters = new Map<MenuId, MenuFilter>([
           alarmRuleEntityTypeList.some(entityType => userPermissionsService.hasGenericPermissionByEntityGroupType(Operation.READ_CALCULATED_FIELD, entityType))
   ],
   [
+    MenuId.production_screens, (_authState, userPermissionsService) =>
+      userPermissionsService.hasReadGenericPermission(Resource.DASHBOARD) || userPermissionsService.hasReadGroupsPermission(EntityType.DASHBOARD)
+  ],
+  [
     MenuId.dashboard_all, (_authState, userPermissionsService) =>
           userPermissionsService.hasReadGenericPermission(Resource.DASHBOARD)
   ],
@@ -2033,6 +2049,7 @@ export const defaultUserMenuMap = new Map<Authority, MenuReference[]>([
             ]
           },
           {id: MenuId.production},
+          {id: MenuId.production_screens},
           {
             id: MenuId.alarms_center,
             pages: [
@@ -2239,6 +2256,7 @@ export const defaultUserMenuMap = new Map<Authority, MenuReference[]>([
             ]
           },
           {id: MenuId.production},
+          {id: MenuId.production_screens},
           {
             id: MenuId.alarms_center,
             pages: [

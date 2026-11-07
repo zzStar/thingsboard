@@ -1,0 +1,22 @@
+{
+  "fqn": "production_wallboard",
+  "name": "设备产量大屏",
+  "deprecated": false,
+  "descriptor": {
+    "type": "static",
+    "sizeX": 24,
+    "sizeY": 12,
+    "resources": [],
+    "templateHtml": "<tb-production-wallboard [ctx]=\"ctx\"></tb-production-wallboard>",
+    "templateCss": "",
+    "controllerScript": "self.onInit = function() {};",
+    "settingsDirective": "tb-production-wallboard-settings",
+    "hasBasicMode": false,
+    "defaultConfig": "{\"showTitle\": false, \"padding\": \"0px\", \"backgroundColor\": \"transparent\", \"settings\": {\"configVersion\": 1, \"title\": \"设备产量指挥中心\", \"source\": {\"mode\": \"ALL_VISIBLE\", \"groupIds\": [], \"deviceIds\": []}, \"typeAttribute\": \"productionType\", \"typeOrder\": [\"折页机\", \"印刷机\", \"装订机\"], \"display\": {\"theme\": \"dark\", \"typesPerFrame\": 3, \"devicesPerCard\": 7, \"detailRowBudget\": 16, \"rotationSeconds\": 20, \"refreshSeconds\": 5}}}"
+  },
+  "description": "按设备类型、单位、时区分组；原生权限；固定容量整页轮播。",
+  "tags": [
+    "production",
+    "wallboard"
+  ]
+}

@@ -1,0 +1,226 @@
+<!-- SPDX-FileCopyrightText: Copyright The ThingsBoard Authors -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<div #viewport class="viewport" [class.light]="isLight">
+  <main class="canvas"
+        [style.transform]="'scale(' + scale + ')'" [style.left.px]="left" [style.top.px]="top">
+    <header>
+      <div class="brand"><span>生产运营中心<small>设备产量监测</small></span></div>
+      <div class="heading"><h1>{{ snapshot?.config.title || '设备产量指挥中心' }}</h1><span>生产数据实时看板</span></div>
+      <div class="clock"><strong>{{ clock | date:'HH:mm:ss' }}</strong><span>{{ clock | date:'yyyy.MM.dd' }} {{ weekday }}</span></div>
+    </header>
+    <div class="workspace">
+      <nav class="device-menu" aria-label="设备产量导航">
+        <div class="menu-heading">
+          <span class="menu-heading-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>
+          <div class="menu-caption"><h2>设备导航</h2><span>按类型查看设备</span></div>
+        </div>
+        <button class="overview-link" [class.active]="selection?.view === 'ALL'"
+                [attr.aria-current]="selection?.view === 'ALL' ? 'page' : null" (click)="select('ALL')">
+          <svg class="overview-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 10h18M10 10v11"/></svg><span>全类型总览</span>
+        </button>
+        <div class="menu-scroll" tabindex="0" role="region" aria-label="设备类型和设备列表">
+          <ul class="type-list">
+            @for (group of navigationGroups; track group.type.id) {
+              <li class="type-group" [class.expanded]="expandedTypeId === group.type.id">
+                <div class="type-menu-row" [class.contains-selection]="selection?.view !== 'ALL' && selection?.typeId === group.type.id">
+                  <button class="expand-type" [attr.aria-label]="(expandedTypeId === group.type.id ? '收起' : '展开') + group.type.name"
+                          [attr.aria-expanded]="expandedTypeId === group.type.id" (click)="toggleType(group.type.id)">
+                    <svg class="type-chevron" [class.open]="expandedTypeId === group.type.id" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+                  </button>
+                  <button class="type-menu-link" [class.active]="selection?.view === 'TYPE' && selection?.typeId === group.type.id"
+                          [attr.aria-current]="selection?.view === 'TYPE' && selection?.typeId === group.type.id ? 'page' : null"
+                          [attr.aria-label]="'查看' + group.type.name + '产量'" [title]="group.type.name + ' · ' + group.type.unit"
+                          (click)="select('TYPE', group.type.id)">
+                    <span class="type-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 9h4v6H7zM15 9h2m-2 4h2M7 19v2m10-2v2"/></svg></span>
+                    <span class="menu-name">{{ group.type.name }}</span><span class="device-count">{{ group.type.deviceCount }}</span>
+                  </button>
+                </div>
+                @if (expandedTypeId === group.type.id) {
+                  <ul class="device-list">
+                    @for (device of group.devices; track device.id) {
+                      <li><button class="device-menu-link" [class.active]="selection?.view === 'DEVICE' && selection?.deviceId === device.id"
+                                  [attr.aria-current]="selection?.view === 'DEVICE' && selection?.deviceId === device.id ? 'page' : null"
+                                  [title]="device.name" (click)="select('DEVICE', device.id)">
+                        <span class="device-marker" aria-hidden="true"></span><span class="menu-name">{{ device.name }}</span>
+                      </button></li>
+                    }
+                  </ul>
+                }
+              </li>
+            }
+          </ul>
+        </div>
+      </nav>
+      <div class="right-content">
+        <div class="view-toolbar">
+          <div class="view-title"><strong [title]="viewName">{{ viewName }}</strong>
+            @if (navigationGroups.length) { <span class="scope-label">{{ viewDescription }}</span> }
+          </div>
+          <div class="tools">
+            <div class="theme-toggle" role="group" aria-label="显示主题">
+              <button class="theme-option day" [class.active]="isLight" (click)="setTheme('light')"
+                      aria-label="浅色模式" [attr.aria-pressed]="isLight" title="浅色模式">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/></svg>
+              </button>
+              <button class="theme-option night" [class.active]="!isLight" (click)="setTheme('dark')"
+                      aria-label="深色模式" [attr.aria-pressed]="!isLight" title="深色模式">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 13A8.5 8.5 0 0 1 11 3.5 8.5 8.5 0 1 0 20.5 13Z"/></svg>
+              </button>
+            </div>
+            @if (snapshot?.pageCount > 1) { <button (click)="toggleRotation()">{{ paused ? '▶ 恢复轮播' : 'Ⅱ 暂停轮播' }}</button> }
+            <button (click)="fullscreen()" aria-label="全屏">⛶</button></div>
+        </div>
+        <div class="content-panels">
+          @if (snapshot?.frames.length) {
+            @if (snapshot.view === 'ALL') {
+              <section class="overview-grid" [style.--columns]="snapshot.frames.length" aria-label="各类型产量总览">
+                @for (frame of snapshot.frames; track frame.type.id) {
+                  <div class="overview-column">
+                    <article class="overview-summary panel">
+                      <div class="panel-heading"><h2 [title]="frame.type.name">{{ frame.type.name }}</h2><button class="text-action" (click)="select('TYPE', frame.type.id)" [attr.aria-label]="'查看' + frame.type.name + '汇总'">{{ frame.type.deviceCount }} 台 <span aria-hidden="true">↗</span></button></div>
+                      <div class="overview-today"><span>今日产量 <small>{{ frame.type.unit }}</small></span>
+                        <strong [class.missing]="frame.type.totals.today === null" [title]="number(frame.type.totals.today) + ' ' + frame.type.unit">{{ frame.type.totals.today === null ? '暂无数据' : compact(frame.type.totals.today) }}</strong>
+                      </div>
+                      <div class="overview-metrics">
+                        <div><span>本周产量</span><b [title]="number(frame.type.totals.week) + ' ' + frame.type.unit">{{ compact(frame.type.totals.week) }}</b></div>
+                        <div><span>本月产量</span><b [title]="number(frame.type.totals.month) + ' ' + frame.type.unit">{{ compact(frame.type.totals.month) }}</b></div>
+                        <div><span>月均单机速度</span><b [title]="number(frame.type.totals.averageSpeed, 1) + ' ' + frame.type.unit + '/小时'">{{ compact(frame.type.totals.averageSpeed) }}</b><small>{{ frame.type.unit }}/小时</small></div>
+                      </div>
+                    </article>
+                    <article class="overview-analysis panel">
+                      <div class="overview-trend">
+                        <div class="panel-heading"><h3>本月每日产量</h3><span>{{ frame.type.unit }}</span></div>
+                        <ng-container [ngTemplateOutlet]="quantityTrend" [ngTemplateOutletContext]="{frame: frame}"></ng-container>
+                      </div>
+                      <div class="overview-devices">
+                        <div class="panel-heading"><h3>今日设备产量</h3><span>{{ frame.devicePage + 1 }}/{{ frame.devicePages }} 页</span></div>
+                        <ng-container [ngTemplateOutlet]="deviceComparison" [ngTemplateOutletContext]="{frame: frame}"></ng-container>
+                      </div>
+                    </article>
+                  </div>
+                }
+              </section>
+            } @else {
+              @for (frame of snapshot.frames; track frame.type.id) {
+                <section class="detail-metrics" [class.device-metrics]="snapshot.view === 'DEVICE'" aria-label="产量指标">
+                  @if (snapshot.view === 'DEVICE') {
+                    <article class="metric panel live-metric"><span>实时速度 <small>{{ frame.type.unit }}/小时</small></span><strong [class.missing]="liveSpeed(frame.devices[0]) === null">{{ liveSpeed(frame.devices[0]) === null ? '暂无数据' : number(liveSpeed(frame.devices[0]), 1) }}</strong></article>
+                  }
+                  <article class="metric panel"><span>今日产量 <small>{{ frame.type.unit }}</small></span><strong [class.missing]="frame.type.totals.today === null">{{ frame.type.totals.today === null ? '暂无数据' : number(frame.type.totals.today) }}</strong></article>
+                  <article class="metric panel"><span>本周产量 <small>{{ frame.type.unit }}</small></span><strong>{{ number(frame.type.totals.week) }}</strong></article>
+                  <article class="metric panel"><span>本月产量 <small>{{ frame.type.unit }}</small></span><strong>{{ number(frame.type.totals.month) }}</strong></article>
+                  <article class="metric panel"><span>{{ snapshot.view === 'TYPE' ? '月均单机速度' : '月均速度' }} <small>{{ frame.type.unit }}/小时</small></span><strong>{{ number(frame.type.totals.averageSpeed, 1) }}</strong></article>
+                </section>
+                @if (snapshot.view === 'TYPE') {
+                  <section class="category-grid">
+                    <article class="table-panel panel">
+                      <div class="panel-heading"><h2>设备班次产量</h2><span>{{ frame.type.unit }} · 第 {{ frame.devicePage + 1 }}/{{ frame.devicePages }} 页</span></div>
+                      <table class="production-table"><colgroup><col style="width:18%"><col style="width:14%"><col style="width:17%"><col style="width:17%"><col style="width:17%"><col style="width:17%"></colgroup>
+                        <thead><tr><th>设备</th><th>班次</th><th>今日产量</th><th>本周产量</th><th>本月产量</th><th>月均速度</th></tr></thead><tbody>
+                        @for (device of frame.devices; track device.id) {
+                          @for (shift of device.shifts; track $index) {
+                            <tr [class.device-start]="$first">
+                              @if ($first) { <td [attr.rowspan]="device.shifts.length"><button class="device-link" [title]="device.name + ' · 生产日 ' + device.productionDate" (click)="select('DEVICE', device.id)">{{ device.name }}</button></td> }
+                              <td class="shift" [title]="shift.name + ' ' + shift.start + '–' + shift.end">{{ shift.name }}</td>
+                              <td>{{ number(shift.today) }}</td><td>{{ number(shift.week) }}</td><td>{{ number(shift.month) }}</td><td>{{ number(shift.averageSpeed, 1) }}</td>
+                            </tr>
+                          }
+                        }
+                        @for (shift of frame.shiftTotals; track $index) {
+                          <tr class="total"><td>{{ $first ? '全组汇总' : '' }}</td><td class="shift" [title]="shift.name">{{ shift.name }}</td><td>{{ number(shift.today) }}</td><td>{{ number(shift.week) }}</td><td>{{ number(shift.month) }}</td><td>{{ number(shift.averageSpeed, 1) }}</td></tr>
+                        }
+                      </tbody></table>
+                      <p class="table-note">月均速度按已过自然时间计算，包含停机与离线时间。</p>
+                    </article>
+                    <aside class="category-charts">
+                      <article class="chart-panel panel"><div class="panel-heading"><h2>今日设备产量</h2><span>{{ frame.type.unit }} · 当前页</span></div>
+                        @if (hasTodayData(frame)) { <ng-container [ngTemplateOutlet]="deviceComparison" [ngTemplateOutletContext]="{frame: frame}"></ng-container> }
+                        @else { <ng-container [ngTemplateOutlet]="chartEmpty" [ngTemplateOutletContext]="{message: '今日暂无产量数据', detail: '历史周、月产量仍可查看'}"></ng-container> }
+                      </article>
+                      <article class="chart-panel panel"><div class="panel-heading"><h2>本月每日产量</h2><span>{{ frame.type.unit }} · 全组</span></div><ng-container [ngTemplateOutlet]="quantityTrend" [ngTemplateOutletContext]="{frame: frame}"></ng-container></article>
+                    </aside>
+                  </section>
+                } @else {
+                  @if (frame.devices[0]; as device) {
+                    @if (device.shifts.length <= 3) {
+                      <section class="shift-cards" [style.--shifts]="device.shifts.length || 1" aria-label="班次产量">
+                        @for (shift of device.shifts; track $index) {
+                          <article class="shift-card panel"><div class="panel-heading"><h2 [title]="shift.name">{{ shift.name }}</h2><span>{{ shift.start }}–{{ shift.end }} · {{ frame.type.unit }}</span></div>
+                            <div class="shift-values"><div class="shift-today"><span>今日产量</span><b>{{ number(shift.today) }}</b></div><div><span>本周产量</span><b [title]="number(shift.week)">{{ compact(shift.week) }}</b></div><div><span>本月产量</span><b [title]="number(shift.month)">{{ compact(shift.month) }}</b></div><div><span>月均速度 <small>/小时</small></span><b>{{ number(shift.averageSpeed, 1) }}</b></div></div>
+                          </article>
+                        } @empty { <article class="shift-card panel"><h2>班次产量</h2><p class="table-note">当前暂无班次记录</p></article> }
+                      </section>
+                      <section class="device-charts">
+                        <article class="chart-panel panel"><div class="panel-heading"><h2>近一小时速度</h2><span>{{ frame.type.unit }}/小时</span></div><ng-container [ngTemplateOutlet]="speedTrend"></ng-container></article>
+                        <article class="chart-panel panel"><div class="panel-heading"><h2>本月每日产量</h2><span>{{ frame.type.unit }}</span></div><ng-container [ngTemplateOutlet]="quantityTrend" [ngTemplateOutletContext]="{frame: frame}"></ng-container></article>
+                      </section>
+                    } @else {
+                      <section class="device-dense-grid">
+                        <article class="table-panel panel"><div class="panel-heading"><h2>班次产量</h2><span>{{ frame.type.unit }}</span></div>
+                          <table class="production-table device-shift-table"><colgroup><col style="width:24%"><col style="width:19%"><col style="width:19%"><col style="width:19%"><col style="width:19%"></colgroup><thead><tr><th>班次</th><th>今日产量</th><th>本周产量</th><th>本月产量</th><th>月均速度</th></tr></thead><tbody>
+                            @for (shift of device.shifts; track $index) { <tr><td class="shift" [title]="shift.name + ' ' + shift.start + '–' + shift.end">{{ shift.name }}</td><td>{{ number(shift.today) }}</td><td>{{ number(shift.week) }}</td><td>{{ number(shift.month) }}</td><td>{{ number(shift.averageSpeed, 1) }}</td></tr> }
+                          </tbody></table><p class="table-note">月均速度按已过自然时间计算，包含停机与离线时间。</p>
+                        </article>
+                        <aside class="category-charts">
+                          <article class="chart-panel panel"><div class="panel-heading"><h2>近一小时速度</h2><span>{{ frame.type.unit }}/小时</span></div><ng-container [ngTemplateOutlet]="speedTrend"></ng-container></article>
+                          <article class="chart-panel panel"><div class="panel-heading"><h2>本月每日产量</h2><span>{{ frame.type.unit }}</span></div><ng-container [ngTemplateOutlet]="quantityTrend" [ngTemplateOutletContext]="{frame: frame}"></ng-container></article>
+                        </aside>
+                      </section>
+                    }
+                  }
+                }
+              }
+            }
+          } @else {
+            <section class="empty" role="status"><strong>{{ error || (snapshot ? '当前范围内暂无可查看设备' : '正在读取生产数据…') }}</strong><p>{{ snapshot || error ? '请检查设备范围或联系管理员' : '正在同步最新产量' }}</p></section>
+          }
+        </div>
+      </div>
+    </div>
+    <footer>
+      <div class="freshness" [class.offline]="disconnected"><i class="status-dot"></i><span>{{ disconnected ? error : '数据自动更新' }}</span><span>最近成功 {{ lastSuccess ? (lastSuccess | date:'HH:mm:ss') : '—' }}</span></div>
+      <div class="pagination">
+        @if (snapshot?.pageCount > 1) { <button (click)="changePage(-1)" aria-label="上一页">‹</button><span>{{ snapshot.page + 1 }} / {{ snapshot.pageCount }}</span><button (click)="changePage(1)" aria-label="下一页">›</button><span class="rotation">{{ paused ? '手动查看' : countdown + ' 秒后整页切换' }}</span> }
+        @else { <span>{{ snapshot ? '当前共 1 页' : '等待数据' }}</span> }
+      </div>
+    </footer>
+  </main>
+</div>
+
+<ng-template #deviceComparison let-frame="frame">
+  <div class="device-bars">
+    @for (device of frame.devices; track device.id) {
+      <button class="device-bar" (click)="select('DEVICE', device.id)" [attr.aria-label]="'查看' + device.name + '产量'">
+        <span class="device-name" [title]="device.name">{{ device.name }}</span>
+        @if (device.totals.today !== null) { <span class="bar-track"><i [style.width.%]="barWidth(frame, device.totals.today)"></i></span><b [title]="number(device.totals.today) + ' ' + frame.type.unit">{{ compact(device.totals.today) }}</b> }
+        @else { <span class="bar-unknown">暂无数据</span> }
+      </button>
+    }
+  </div>
+</ng-template>
+<ng-template #quantityTrend let-frame="frame">
+  @if (hasTrendData(frame)) {
+    <div class="chart-stage"><span class="chart-max">{{ compact(trendMax(frame) || 1) }}</span><span class="chart-zero">0</span>
+      <svg viewBox="0 0 680 240" preserveAspectRatio="none" role="img" aria-label="本月每日产量趋势">
+        <path class="gridline" d="M50 30H650 M50 120H650 M50 210H650"/>
+        <path class="trend" [attr.d]="trendPath(frame)"/>
+        @for (point of trend(frame); track point.date; let index = $index) {
+          @if (point.quantity !== null) { <circle class="trend-dot" [attr.cx]="50 + index * 600 / (trend(frame).length > 1 ? trend(frame).length - 1 : 1)" [attr.cy]="210 - point.quantity / (trendMax(frame) || 1) * 180" r="3"><title>{{ point.date }}: {{ number(point.quantity) }} {{ frame.type.unit }}</title></circle> }
+        }
+      </svg>
+    </div>
+    <div class="axis"><span>{{ shortDate(trend(frame)[0]?.date) }}</span><span>含当日累计</span><span>{{ shortDate(trend(frame)[trend(frame).length - 1]?.date) }}</span></div>
+  } @else { <ng-container [ngTemplateOutlet]="chartEmpty" [ngTemplateOutletContext]="{message: '本月暂无产量数据', detail: '采集后自动更新'}"></ng-container> }
+</ng-template>
+<ng-template #speedTrend>
+  @if (!disconnected && !snapshot?.speedUnavailable && hasSpeedData()) {
+    <div class="chart-stage"><span class="chart-max">{{ compact(speedMax() || 1) }}</span><span class="chart-zero">0</span>
+      <svg viewBox="0 0 680 240" preserveAspectRatio="none" role="img" aria-label="近一小时速度趋势"><path class="gridline" d="M50 30H650 M50 120H650 M50 210H650"/><path class="trend" [attr.d]="speedPath()"/>
+        @if (singleSpeedPoint(); as point) { <circle class="trend-dot" [attr.cx]="speedX(point.ts)" [attr.cy]="210 - +point.value / (speedMax() || 1) * 180" r="3"><title>{{ point.ts | date:'HH:mm:ss' }}: {{ number(+point.value, 1) }}</title></circle> }
+      </svg>
+    </div><div class="axis"><span>一小时前</span><span>现在</span></div>
+  } @else { <ng-container [ngTemplateOutlet]="chartEmpty" [ngTemplateOutletContext]="{message: disconnected ? '速度连接中断' : '暂无速度数据', detail: disconnected ? '正在重新连接' : '近一小时暂无可展示记录'}"></ng-container> }
+</ng-template>
+<ng-template #chartEmpty let-message="message" let-detail="detail">
+  <div class="chart-empty" role="status"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M8 8v32h32M15 29l8-9 7 5 10-13"/><circle cx="40" cy="12" r="2"/></svg><strong>{{ message }}</strong><span>{{ detail }}</span></div>
+</ng-template>

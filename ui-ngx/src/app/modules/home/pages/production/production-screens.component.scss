@@ -1,0 +1,20 @@
+// SPDX-FileCopyrightText: Copyright The ThingsBoard Authors
+// SPDX-License-Identifier: Apache-2.0
+:host { display: block; height: 100%; min-height: 0; }
+.screens-page { display: flex; flex-direction: column; box-sizing: border-box; height: 100%; min-height: 0; padding: 24px; gap: 18px; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+h1 { font-size: 26px; margin: 0; }
+header p { margin: 10px 0 0; color: #64748b; }
+.actions, .filters, .create-form { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.filters mat-form-field, .create-form mat-form-field { width: min(380px, 100%); }
+.table-wrap { flex: 1; min-height: 0; overflow: auto; border: 1px solid #dbe2ea; border-radius: 8px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 16px 20px; border-bottom: 1px solid #e2e8f0; text-align: left; }
+th { background: #f5f7fa; color: #475569; font-weight: 500; position: sticky; top: 0; z-index: 1; }
+td a:not([mat-stroked-button]) { color: #2874c4; text-decoration: none; }
+td a:hover { text-decoration: underline; }
+.row-actions { width: 220px; white-space: nowrap; }
+.empty { text-align: center; padding: 64px; color: #64748b; }
+.error { color: #c62828; }
+mat-paginator { flex-shrink: 0; }
+@media (max-width: 800px) { header { align-items: flex-start; flex-direction: column; } .screens-page { padding: 16px; } }
